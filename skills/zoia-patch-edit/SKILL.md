@@ -94,11 +94,12 @@ a byte your edit changed.
 
 Still worth doing:
 
-- `decode` checks this for you and warns loudly when a patch does not survive
-  a round-trip. **If it warns, stop and tell the user** — do not edit that
-  patch. Patches saved before firmware 1.10 have no module colour section and
+- `decode` **refuses** a patch that does not survive a round-trip, and writes
+  no JSON. Patches saved before firmware 1.10 have no module colour section and
   use a compact module layout the encoder cannot rebuild, so anything written
-  back is corrupt. Ask them to re-save the patch on the pedal first.
+  back would be corrupt. Do not try to work around it: report it to the user
+  and ask them to re-save the patch on the pedal, which converts it. `info` and
+  `roundtrip` still work on such a patch, for inspection.
 - Run `roundtrip` on a `.bin` you have not worked with before — one command,
   and it proves the patch is in the supported format.
 - Keep a `.bak` of the original before overwriting anything.

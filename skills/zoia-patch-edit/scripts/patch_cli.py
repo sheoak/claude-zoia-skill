@@ -347,22 +347,29 @@ def cmd_decode(args):
     load_engine()
     in_path = _abs(args.input)
     raw, patch = _parse_bin(in_path)
+
+    # Refuse before writing anything: a patch that cannot be rebuilt must not
+    # become the starting point of an edit.
+    problem = _fidelity_problem(raw, patch)
+    if problem:
+        sys.stderr.write(
+            "error: {} cannot be written back faithfully "
+            "({}).\n\n".format(args.input, problem)
+        )
+        sys.stderr.write(
+            "Editing it would produce a file the pedal may refuse, so decoding\n"
+            "is refused. The usual cause is a patch saved before firmware 1.10:\n"
+            "it has no module colour section and uses a compact module layout\n"
+            "the encoder cannot rebuild.\n\n"
+            "Re-save the patch on the pedal to convert it, then decode again.\n"
+            "`info` and `roundtrip` still work on it.\n"
+        )
+        return 2
+
     out_path = _abs(args.output) or (in_path.rsplit(".", 1)[0] + ".json")
     with open(out_path, "w") as f:
         json.dump(patch, f, indent=2)
     print("Decoded {} -> {}".format(args.input, out_path))
-
-    problem = _fidelity_problem(raw, patch)
-    if problem:
-        print()
-        print("!! This patch does not survive a round-trip: {}.".format(problem))
-        print("   Editing it will produce a file the pedal may refuse. Patches")
-        print("   saved before firmware 1.10 have no module colour section and")
-        print("   use a compact module layout the encoder cannot rebuild.")
-        print("   Run `roundtrip` for the detail, and prefer a patch re-saved")
-        print("   on the pedal as your starting point.")
-
-    print()
     print("\n".join(_summary_lines(patch)))
     return 0
 
