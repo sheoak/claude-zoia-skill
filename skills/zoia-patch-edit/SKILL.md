@@ -198,12 +198,16 @@ round-trip intact, including `/`, `!`, `&` and `"`. Two of them do not, and
 non-ASCII is a separate problem.
 
 **Reading** — the parser does not decode the bytes, it string-splits their
-Python `repr()`. A backslash or an apostrophe therefore truncates the name:
+Python `repr()`. Everything `repr` escapes therefore truncates the name: a
+backslash, an apostrophe, or a control character (below `0x20`, plus `DEL`).
+Those all encode perfectly well, at one byte each; they simply cannot be read
+back.
 
 | stored in the field | read back |
 | :-- | :-- |
 | `Don't Panic` | `t Panic` |
 | `A\B` | `A` |
+| `A<TAB>B` | `A` |
 
 **Writing** — a non-ASCII character cannot be encoded at all. The encoder sizes
 the field in characters but fills it with UTF-8 bytes, so `é` raises

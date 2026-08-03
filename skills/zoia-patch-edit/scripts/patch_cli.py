@@ -44,11 +44,29 @@ ZOIA_LIB_REPO = "https://github.com/meanmedianmoge/zoia_lib.git"
 # exactly one file.
 SLOT_RE = re.compile(r"^(\d{3})_zoia_(.+)\.bin$", re.IGNORECASE)
 
-# Names live in a fixed 16-byte field. Punctuation is fine — of the 95 printable
-# ASCII characters only these two are mangled, because the parser string-splits
-# the repr() of the bytes. Non-ASCII is unsafe too: it fails to encode outright.
+# Names live in a fixed 16-byte field, and two independent things go wrong.
+#
+# The parser string-splits the repr() of the bytes, so every character repr
+# escapes is truncated: a backslash, an apostrophe, and the control characters
+# (below 0x20, plus DEL). All of those encode perfectly well — they are one
+# byte each — they simply cannot be read back.
+#
+# Separately, the encoder sizes the field in characters while filling it with
+# UTF-8 bytes, so anything above ASCII costs more than it counted and fails to
+# encode at all. Punctuation is fine: of the 95 printable ASCII characters,
+# only the backslash and the apostrophe are unsafe.
 NAME_MANGLED = "\\'"
 NAME_BYTES = 16
+
+
+def _is_mangled(c):
+    """True if the parser cannot read this character back."""
+    return c in NAME_MANGLED or ord(c) < 0x20 or ord(c) == 0x7F
+
+
+def _is_unwritable(c):
+    """True if the encoder cannot write this character at all."""
+    return ord(c) > 0x7F
 
 # Paths on the command line are relative to where the user invoked us, but the
 # engine only finds its schemas when the process runs from the zoia_lib root,
@@ -308,14 +326,14 @@ def _check_names(patch):
             return
 
         reasons = []
-        mangled = {c for c in name if c in NAME_MANGLED}
+        mangled = {c for c in name if _is_mangled(c)}
         if mangled:
             reasons.append("truncates the name when read back: " + listing(mangled))
-        unwritable = {c for c in name if not 0x20 <= ord(c) <= 0x7E}
+        unwritable = {c for c in name if _is_unwritable(c)}
         if unwritable:
             reasons.append("cannot be encoded: " + listing(unwritable))
-        if not reasons and len(name.encode("utf-8", "replace")) > NAME_BYTES:
-            reasons.append("longer than {} characters".format(NAME_BYTES))
+        if len(name.encode("utf-8", "replace")) > NAME_BYTES:
+            reasons.append("longer than {} bytes".format(NAME_BYTES))
 
         if reasons:
             problems.append((where, name, "; ".join(reasons)))
@@ -336,9 +354,9 @@ def _report_names(problems):
     for where, name, why in problems:
         sys.stderr.write("  {:<{w}}  {!r:<20} {}\n".format(where, name, why, w=width))
     sys.stderr.write(
-        "\nNames hold {} bytes. Punctuation is fine, but a backslash or an\n"
-        "apostrophe is truncated when the name is read back, and a non-ASCII\n"
-        "character cannot be encoded at all.\n"
+        "\nNames hold {} bytes. Punctuation is fine, but a backslash, an\n"
+        "apostrophe or a control character is truncated when the name is read\n"
+        "back, and a non-ASCII character cannot be encoded at all.\n"
         "Rename them, or pass --force to write the patch anyway.\n".format(NAME_BYTES)
     )
 
