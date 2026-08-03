@@ -132,6 +132,50 @@ where `"module.block"` addresses a block, and `strength` is 0-100.
 `pages` is a list of page-name strings. `meta` is a computed summary
 (regenerated on decode; you don't need to hand-edit it).
 
+## ⚠️ Which fields actually get encoded
+
+The decoder emits **two views of the same data**: readable fields, and the raw
+fields it was built from. The encoder prefers the raw ones, so editing the
+readable field alone changes nothing and the output is byte-identical to the
+input. Edit the raw field — and update the readable one too, so the JSON stays
+honest.
+
+| To change | Edit this | Not this |
+| :-- | :-- | :-- |
+| a parameter | `parameters_raw[i]` | `parameters` |
+| a module colour | `colors[module_number]` **and** `header_color_id` | `color` |
+| an option | `options_binary` | `options` |
+| a connection | `strength_raw`, `source_raw`, `source_block_raw`, `dest_raw`, `dest_block_raw` | `source`, `destination`, `strength` |
+
+**Parameters.** `parameters_raw` is positional: index `i` is the *i*-th block of
+the module with `isParam: true`, in `blocks` order — which is also the key order
+of `parameters`. The value is `round(normalized * 65535)`, so `0.24` is `15500`.
+Set both:
+
+```python
+i = [n for n, b in module["blocks"].items() if b["isParam"]].index("mod_depth")
+module["parameters_raw"][i] = round(0.75 * 65535)
+module["parameters"]["mod_depth"] = 0.75
+```
+
+Never delete `parameters_raw` to force the encoder down its `parameters`
+fallback. `parameters` is a *display* value, rounded to two decimals on decode:
+a raw `15500` reads back as `0.24`, and re-encoding that gives `15728`. Taking
+the fallback silently shifts every parameter of the module.
+
+**Colours are stored twice**: `header_color_id` in the module header, and the
+top-level `colors` list at the end of the file. When `len(colors) ==
+len(modules)` the list wins, so changing only `header_color_id` has no visible
+effect. Set `colors[module["number"]]` as well, using the palette ids below
+(Blue = 1 … Mango = 15).
+
+**Connections** encode from the `_raw` fields whenever `strength_raw` is
+present, which it always is after a decode. `strength_raw` is `strength * 100`.
+
+**Verify every edit.** Re-encode, re-decode, and assert the value actually
+changed. A `roundtrip`-style byte comparison that reports *0 differing bytes
+after an edit* means the edit was ignored — not that it succeeded.
+
 ## Grid layout
 
 Each page is an 8×5 grid, and a module occupies cells on it. This is the
