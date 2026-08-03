@@ -609,8 +609,8 @@ def build_parser():
     e.add_argument(
         "--param-order",
         default="order",
-        choices=["order", "saved"],
-        help="parameter serialization mode passed to PatchEncoder",
+        choices=["order", "blocks"],
+        help="parameter order used only when a module has no parameters_raw",
     )
     e.add_argument(
         "--force",
@@ -625,7 +625,7 @@ def build_parser():
 
     r = sub.add_parser("roundtrip", help="check encoder fidelity for a .bin")
     r.add_argument("input", help="path to the .bin patch")
-    r.add_argument("--param-order", default="order", choices=["order", "saved"])
+    r.add_argument("--param-order", default="order", choices=["order", "blocks"])
     r.add_argument("--max-ranges", type=int, default=20, help="diff ranges to show")
     r.set_defaults(func=cmd_roundtrip)
 
