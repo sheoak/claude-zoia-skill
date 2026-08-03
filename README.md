@@ -20,14 +20,18 @@ installed once per machine and work from any directory.
 /reload-plugins
 ```
 
-Then, once per machine:
+The engine then has to be installed once per machine. The simplest way is to
+just ask Claude to edit a patch: the skill checks for the engine and offers to
+run `setup` itself.
+
+To do it by hand, run `setup` from wherever the plugin was installed:
 
 ```
-python3 ~/.claude/plugins/**/skills/zoia-patch-edit/scripts/patch_cli.py setup
+python3 <plugin-dir>/skills/zoia-patch-edit/scripts/patch_cli.py setup
 ```
 
-Or just ask Claude to edit a patch — the skill checks for the engine and offers
-to run `setup` itself.
+Cloning this repository and running the script from there works too — the
+script and the engine are independent.
 
 ## The engine
 
