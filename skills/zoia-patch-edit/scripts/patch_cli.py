@@ -280,21 +280,25 @@ def _check_names(patch):
     """
     problems = []
 
-    def unsafe(c):
-        return c in NAME_MANGLED or not (0x20 <= ord(c) <= 0x7E)
+    def listing(chars):
+        return " ".join(repr(c) for c in sorted(chars))
 
     def check(where, name):
         if not isinstance(name, str):
             return
-        bad = sorted({c for c in name if unsafe(c)})
-        if bad:
-            problems.append(
-                (where, name, "mangled by the parser: " + " ".join(repr(c) for c in bad))
-            )
-        elif len(name.encode("utf-8", "replace")) > NAME_BYTES:
-            problems.append(
-                (where, name, "longer than {} characters".format(NAME_BYTES))
-            )
+
+        reasons = []
+        mangled = {c for c in name if c in NAME_MANGLED}
+        if mangled:
+            reasons.append("truncates the name when read back: " + listing(mangled))
+        unwritable = {c for c in name if not 0x20 <= ord(c) <= 0x7E}
+        if unwritable:
+            reasons.append("cannot be encoded: " + listing(unwritable))
+        if not reasons and len(name.encode("utf-8", "replace")) > NAME_BYTES:
+            reasons.append("longer than {} characters".format(NAME_BYTES))
+
+        if reasons:
+            problems.append((where, name, "; ".join(reasons)))
 
     check("patch name", patch.get("name"))
     for m in patch.get("modules", []):

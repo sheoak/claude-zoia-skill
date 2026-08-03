@@ -172,7 +172,13 @@ effect. Set `colors[module["number"]]` as well, using the palette ids below
 (Blue = 1 … Mango = 15).
 
 **Connections** encode from the `_raw` fields whenever `strength_raw` is
-present, which it always is after a decode. `strength_raw` is `strength * 100`.
+present, which it always is after a decode. `strength_raw` is *not*
+`strength * 100`: it counts hundredths of a percent, and decode truncates it
+with `int(strength_raw / 100)`, so `strength` is a display value exactly like
+`parameters`. The Magician has 8 connections whose raw value is not a multiple
+of 100 — `6990` shows as `69`, and recomputing it from that would write `6900`,
+losing 0.9 points and the byte-exact round-trip. Edit `strength_raw` directly,
+and never derive it from `strength`.
 
 **Verify every edit.** Re-encode, re-decode, and assert the value actually
 changed. A `roundtrip`-style byte comparison that reports *0 differing bytes
