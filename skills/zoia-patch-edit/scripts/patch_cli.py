@@ -198,6 +198,26 @@ def _write_bin(path, data):
         raise
 
 
+def _fidelity_problem(raw, patch, param_order="order"):
+    """Say why this patch cannot be written back faithfully, or return None.
+
+    Some patches predate the per-module colour section (firmware 1.10) and use
+    a more compact module layout. The engine decodes them, but cannot rebuild
+    them, so editing one produces a file the pedal may refuse.
+    """
+    try:
+        encoded = bytes(PatchEncoder().encode(patch, param_order_mode=param_order))
+    except Exception as e:  # noqa: BLE001 - reported, not handled
+        return "re-encoding it fails outright ({}: {})".format(type(e).__name__, e)
+
+    if encoded == raw:
+        return None
+
+    diff = sum(1 for a, b in zip(encoded, raw) if a != b)
+    diff += abs(len(encoded) - len(raw))
+    return "re-encoding it changes {} bytes".format(diff)
+
+
 def _summary_lines(patch):
     """Return a list of human-readable lines describing a parsed patch."""
     meta = patch.get("meta", {})
@@ -331,6 +351,18 @@ def cmd_decode(args):
     with open(out_path, "w") as f:
         json.dump(patch, f, indent=2)
     print("Decoded {} -> {}".format(args.input, out_path))
+
+    problem = _fidelity_problem(raw, patch)
+    if problem:
+        print()
+        print("!! This patch does not survive a round-trip: {}.".format(problem))
+        print("   Editing it will produce a file the pedal may refuse. Patches")
+        print("   saved before firmware 1.10 have no module colour section and")
+        print("   use a compact module layout the encoder cannot rebuild.")
+        print("   Run `roundtrip` for the detail, and prefer a patch re-saved")
+        print("   on the pedal as your starting point.")
+
+    print()
     print("\n".join(_summary_lines(patch)))
     return 0
 
