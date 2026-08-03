@@ -100,7 +100,7 @@ Still worth doing:
 - After encoding, re-run `info` on the result to confirm it still parses.
 - Structural edits (adding/removing modules or connections) stay the riskiest
   kind — not because of the encoder, but because the pedal enforces invariants
-  the JSON does not. Check block counts and grid positions.
+  the JSON does not. See "Grid layout" below before moving anything.
 
 ## JSON structure
 
@@ -117,7 +117,7 @@ A **module** looks like:
   "category": "Interface",
   "cpu": 0.3,
   "page": 0,               // which grid page (0-63)
-  "position": [0, 1],      // grid block indices the module occupies
+  "position": [0, 1],      // cells occupied on the page; only the min is stored
   "color": "Blue",         // header color (see palette below)
   "options": {"channels": "stereo"},
   "parameters": {"level": 0.5},   // param name -> normalized value 0.0-1.0
@@ -132,14 +132,52 @@ where `"module.block"` addresses a block, and `strength` is 0-100.
 `pages` is a list of page-name strings. `meta` is a computed summary
 (regenerated on decode; you don't need to hand-edit it).
 
+## Grid layout
+
+Each page is an 8×5 grid, and a module occupies cells on it. This is the
+easiest thing to get wrong, and `roundtrip` will not catch it: connections are
+index-based, so a scrambled layout still encodes byte-exact. Check it yourself.
+
+- **Only `min(position)` is stored.** The encoder writes one cell number per
+  module; the pedal then lays the module's blocks out in *contiguous* cells
+  from there, in reading order. `"position": [20, 0]` puts the module at cells
+  0-1, not at 20. You cannot scatter a module's blocks around the page.
+- **Give every visible block a cell.** How many blocks are visible depends on
+  the options — `Delay w/Mod` has 7 blocks in mono and 9 as `2in->2out`. Count
+  them in `ModuleIndex.json` under the module's options, and make `position`
+  that long. If it is too short, the pedal places the leftovers wherever it
+  likes.
+- **A page holds 40 cells**, numbered `row * 8 + col`, so 0-39. Anything past
+  39 lands off-grid and the module *disappears on the device*, or the patch
+  crashes. Before encoding, assert that each page's highest cell is ≤ 39 and
+  that no two modules overlap.
+
+Overlaps are occasionally deliberate — a Pixel sitting on a knob's cell is the
+usual way to draw an indicator ring, and to hide an unwanted `cv_output` block.
+So report overlaps, do not silently "fix" them.
+
+**A block's connection index is not its grid cell.** Connections address blocks
+by the logical `position` listed in `ModuleIndex.json`, which stays the same
+whatever the options hide: a Multiplier's `cv_output` is block 8 no matter how
+many inputs it shows. Grid cells, by contrast, are handed out only to visible
+blocks, counting from `min(position)`. Read the index for connection indices;
+count visible blocks for layout.
+
 ## Module reference
 
 The authoritative module database is `ModuleIndex.json` inside the engine
 checkout — `$(python3 "$CLI" where)` prints its root, and the file is at
 `zoia_lib/common/schemas/ModuleIndex.json`. It is keyed by `mod_idx` (as a
 string) and gives each module's real parameter names, value ranges and units
-(`param_defaults`), block layout, options and CPU. Read it before changing
-parameters, so you use correct names and 0.0-1.0 normalized values.
+(`param_defaults`), block layout, options and CPU. Read it before changing a
+parameter or placing a module — it is the only place the names, the block count
+and the real scale of a value are written down.
+
+**A normalized value is not a percentage.** `param_defaults` gives the range it
+maps onto, and gain-like params are in **dB**: a VCA's `level_control` has
+`range: [-inf, -12, -6, -2.5, 0]`, so `0.0` is silence, `0.5` is −6 dB and only
+`1.0` is unity. Setting a pass-through level to "half" buries the signal. Check
+the `unit` before assuming a value is linear.
 
 ## Color palette
 
@@ -149,8 +187,12 @@ White, Orange, Lima, Surf, Sky, Purple, Pink, Peach, Mango.
 ## Tips for musical edits
 
 - "Brighter": raise filter cutoff / high-frequency params toward 1.0.
-- "Add a module": copy an existing module dict, give it a fresh `number`, a
-  free `position` on some `page`, then wire it with a connection.
+- "Add a module": copy an existing module dict of the same `mod_idx`, give it a
+  fresh `number`, then a `page` and a `position` that satisfy the grid rules
+  above, and wire it with a connection. Appending (new `number` = current module
+  count) is safe: it shifts no existing index, so connections and starred params
+  stay valid — bump `meta.n_modules` and append to `colors` too. Removing a
+  module means remapping every index that follows.
 - On a `UI Button`, the `in` value drives colour/brightness, and a connection
   delivers `source × (strength / 100)` — it does not add the raw value.
 - Confirm the intended result with `info`, and when possible by re-decoding
