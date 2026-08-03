@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -43,6 +44,11 @@ ZOIA_LIB_REPO = "https://github.com/meanmedianmoge/zoia_lib.git"
 # Patches on a ZOIA SD card are named <slot>_zoia_<name>.bin, and a slot holds
 # exactly one file.
 SLOT_RE = re.compile(r"^(\d{3})_zoia_(.+)\.bin$", re.IGNORECASE)
+
+# The pedal only stores these characters in patch, module and page names, in a
+# fixed 16-byte field. Anything else is mangled or fails to encode.
+NAME_RE = re.compile(r"^[A-Za-z0-9 .-]*$")
+NAME_BYTES = 16
 
 # Paths on the command line are relative to where the user invoked us, but the
 # engine only finds its schemas when the process runs from the zoia_lib root,
@@ -227,6 +233,50 @@ def cmd_setup(args):
     return 0
 
 
+def _check_names(patch):
+    """Return [(where, name, problem)] for names the pedal cannot store.
+
+    The parser reads names by string-splitting the repr() of their bytes, so an
+    apostrophe or a non-ASCII character comes back truncated ("Don't Panic"
+    reads back as "t Panic"), and the encoder raises struct.error on non-ASCII.
+    """
+    problems = []
+
+    def check(where, name):
+        if not isinstance(name, str):
+            return
+        if not NAME_RE.match(name):
+            bad = sorted({c for c in name if not NAME_RE.match(c)})
+            problems.append(
+                (where, name, "not allowed: " + " ".join(repr(c) for c in bad))
+            )
+        elif len(name.encode("utf-8", "replace")) > NAME_BYTES:
+            problems.append(
+                (where, name, "longer than {} characters".format(NAME_BYTES))
+            )
+
+    check("patch name", patch.get("name"))
+    for m in patch.get("modules", []):
+        check("module {}".format(m.get("number")), m.get("name"))
+    for i, page in enumerate(patch.get("pages", [])):
+        check("page {}".format(i), page)
+    return problems
+
+
+def _report_names(problems):
+    sys.stderr.write(
+        "error: {} name(s) the ZOIA cannot store.\n\n".format(len(problems))
+    )
+    width = max(len(w) for w, _, _ in problems)
+    for where, name, why in problems:
+        sys.stderr.write("  {:<{w}}  {!r:<20} {}\n".format(where, name, why, w=width))
+    sys.stderr.write(
+        "\nNames hold {} characters, from A-Z a-z 0-9, space, dash and dot.\n"
+        "Anything else is silently mangled when read back, or fails to encode.\n"
+        "Rename them, or pass --force to write the patch anyway.\n".format(NAME_BYTES)
+    )
+
+
 def cmd_decode(args):
     load_engine()
     in_path = _abs(args.input)
@@ -245,10 +295,27 @@ def cmd_encode(args):
     in_path = _abs(args.input)
     with open(in_path) as f:
         patch = json.load(f)
+
+    problems = _check_names(patch)
+    if problems:
+        _report_names(problems)
+        if not args.force:
+            return 2
+        sys.stderr.write("\n--force given, encoding anyway.\n\n")
+
     out_path = _abs(args.output) or (in_path.rsplit(".", 1)[0] + ".bin")
-    data = PatchEncoder().encode(
-        patch, output_path=out_path, param_order_mode=args.param_order
-    )
+    try:
+        data = PatchEncoder().encode(
+            patch, output_path=out_path, param_order_mode=args.param_order
+        )
+    except struct.error as e:
+        sys.stderr.write("error: the encoder could not write this patch ({}).\n".format(e))
+        sys.stderr.write(
+            "A non-ASCII character in a name is the usual cause: the encoder "
+            "counts\ncharacters but writes bytes, so 'e' costs one and "
+            "'é' costs two.\n"
+        )
+        return 1
     print("Encoded {} -> {} ({} bytes)".format(args.input, out_path, len(data)))
     return 0
 
@@ -502,6 +569,11 @@ def build_parser():
         default="order",
         choices=["order", "saved"],
         help="parameter serialization mode passed to PatchEncoder",
+    )
+    e.add_argument(
+        "--force",
+        action="store_true",
+        help="encode even if a name uses characters the pedal cannot store",
     )
     e.set_defaults(func=cmd_encode)
 

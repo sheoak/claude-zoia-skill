@@ -176,6 +176,28 @@ present, which it always is after a decode. `strength_raw` is `strength * 100`.
 changed. A `roundtrip`-style byte comparison that reports *0 differing bytes
 after an edit* means the edit was ignored — not that it succeeded.
 
+## Naming
+
+Patch, module and page names live in fixed 16-byte fields, and the pedal only
+stores `A-Z`, `a-z`, `0-9`, space, dash and dot. Stay inside that set.
+
+The parser reads a name by string-splitting the `repr()` of its bytes, so
+anything else is silently mangled on the way back:
+
+| written | read back |
+| :-- | :-- |
+| `Don't Panic` | `t Panic` |
+| `Café` | `Caf` |
+| `A\B` | `A` |
+
+A non-ASCII character is worse still: the encoder counts characters but writes
+bytes, so it raises `struct.error` and writes nothing.
+
+`encode` checks this for you and refuses, listing the offending names; `--force`
+bypasses the check but cannot save a non-ASCII name. Unlike the grid and raw-field
+traps, `roundtrip` *does* catch this one — a mangled name re-encodes to different
+bytes, so the patch is no longer byte-exact.
+
 ## Grid layout
 
 Each page is an 8×5 grid, and a module occupies cells on it. This is the
