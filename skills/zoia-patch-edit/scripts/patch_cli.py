@@ -44,29 +44,64 @@ ZOIA_LIB_REPO = "https://github.com/meanmedianmoge/zoia_lib.git"
 # exactly one file.
 SLOT_RE = re.compile(r"^(\d{3})_zoia_(.+)\.bin$", re.IGNORECASE)
 
-# Names live in a fixed 16-byte field, and two independent things go wrong.
-#
-# The parser string-splits the repr() of the bytes, so every character repr
-# escapes is truncated: a backslash, an apostrophe, and the control characters
-# (below 0x20, plus DEL). All of those encode perfectly well — they are one
-# byte each — they simply cannot be read back.
-#
-# Separately, the encoder sizes the field in characters while filling it with
-# UTF-8 bytes, so anything above ASCII costs more than it counted and fails to
-# encode at all. Punctuation is fine: of the 95 printable ASCII characters,
-# only the backslash and the apostrophe are unsafe.
-NAME_MANGLED = "\\'"
+# Names live in a fixed 16-byte field. Which characters actually survive it
+# depends on the engine, so it is measured rather than assumed — see
+# _probe_names below.
 NAME_BYTES = 16
 
 
-def _is_mangled(c):
-    """True if the parser cannot read this character back."""
-    return c in NAME_MANGLED or ord(c) < 0x20 or ord(c) == 0x7F
+# Rather than hard-code the two defects above, probe the engine in use: a
+# patched or newer zoia_lib may handle characters this one cannot, and the
+# check must not refuse names such an engine stores perfectly well. One
+# witness per class of character is enough, since each class fails for a
+# single shared reason.
+NAME_PROBES = {
+    "apostrophe": "'",
+    "backslash": "\\",
+    "control": "\t",
+    "delete": "\x7F",
+    "non-ascii": "é",
+}
+
+_name_verdicts = None
 
 
-def _is_unwritable(c):
-    """True if the encoder cannot write this character at all."""
-    return ord(c) > 0x7F
+def _probe_names():
+    """Measure which characters this engine really stores, and how it fails."""
+    global _name_verdicts
+    if _name_verdicts is not None:
+        return _name_verdicts
+
+    _name_verdicts = {}
+    for cls, char in NAME_PROBES.items():
+        witness = "A" + char + "B"
+        try:
+            field = bytes(PatchEncoder.encode_text(witness, NAME_BYTES))
+        except Exception:  # noqa: BLE001 - the failure is the measurement
+            _name_verdicts[cls] = "cannot be encoded"
+            continue
+        try:
+            same = PatchBinary._qc_name(field) == witness
+        except Exception:  # noqa: BLE001 - idem
+            same = False
+        _name_verdicts[cls] = None if same else "truncates the name when read back"
+    return _name_verdicts
+
+
+def _char_problem(c):
+    """Return why this engine cannot store the character, or None."""
+    verdicts = _probe_names()
+    if ord(c) > 0x7F:
+        return verdicts["non-ascii"]
+    if ord(c) == 0x7F:
+        return verdicts["delete"]
+    if ord(c) < 0x20:
+        return verdicts["control"]
+    if c == "'":
+        return verdicts["apostrophe"]
+    if c == "\\":
+        return verdicts["backslash"]
+    return None
 
 # Paths on the command line are relative to where the user invoked us, but the
 # engine only finds its schemas when the process runs from the zoia_lib root,
@@ -216,24 +251,68 @@ def _write_bin(path, data):
         raise
 
 
-def _fidelity_problem(raw, patch, param_order="order"):
-    """Say why this patch cannot be written back faithfully, or return None.
+MODULE_HEADER_FIELDS = {
+    0: "the module size",
+    1: "the module type",
+    2: "the module version",
+    3: "the page number — pages above 63 (Euroburo I/O) are reset to 0",
+    4: "the header colour",
+    5: "the grid position",
+    6: "the parameter count",
+    7: "the saved-data size",
+    8: "module options the module index does not describe",
+    9: "module options the module index does not describe",
+}
 
-    Some patches predate the per-module colour section (firmware 1.10) and use
-    a more compact module layout. The engine decodes them, but cannot rebuild
-    them, so editing one produces a file the pedal may refuse.
-    """
+
+def _diff_causes(raw, encoded, patch):
+    """Name the fields the re-encode would change, for a useful diagnosis."""
+    differing = {i // 4 for i in range(min(len(raw), len(encoded))) if raw[i] != encoded[i]}
+    if not differing:
+        return []
+
+    bounds, step = [], 6
+    for m in patch.get("modules", []):
+        size = m.get("size") or 0
+        bounds.append((step, step + size))
+        step += size
+
+    causes = set()
+    for word in differing:
+        for start, end in bounds:
+            if start <= word < end:
+                offset = word - start
+                causes.add(
+                    MODULE_HEADER_FIELDS.get(offset, "module parameters or saved data")
+                )
+                break
+        else:
+            causes.add("the connections, pages, starred params or colours")
+    return sorted(causes)
+
+
+def _fidelity_problem(raw, patch, param_order="order"):
+    """Say why this patch cannot be written back faithfully, or return None."""
     try:
         encoded = bytes(PatchEncoder().encode(patch, param_order_mode=param_order))
     except Exception as e:  # noqa: BLE001 - reported, not handled
-        return "re-encoding it fails outright ({}: {})".format(type(e).__name__, e)
+        return "re-encoding it fails outright ({}: {})".format(type(e).__name__, e), []
 
     if encoded == raw:
-        return None
+        return None, []
 
     diff = sum(1 for a, b in zip(encoded, raw) if a != b)
     diff += abs(len(encoded) - len(raw))
-    return "re-encoding it changes {} bytes".format(diff)
+
+    try:
+        readable = PatchBinary().parse_data(encoded) == patch
+    except Exception:  # noqa: BLE001 - the result simply does not parse
+        readable = False
+
+    summary = "re-encoding it changes {} bytes{}".format(
+        diff, "" if readable else ", and the result no longer reads back the same"
+    )
+    return summary, _diff_causes(raw, encoded, patch)
 
 
 def _summary_lines(patch):
@@ -326,12 +405,13 @@ def _check_names(patch):
             return
 
         reasons = []
-        mangled = {c for c in name if _is_mangled(c)}
-        if mangled:
-            reasons.append("truncates the name when read back: " + listing(mangled))
-        unwritable = {c for c in name if _is_unwritable(c)}
-        if unwritable:
-            reasons.append("cannot be encoded: " + listing(unwritable))
+        by_problem = {}
+        for c in name:
+            problem = _char_problem(c)
+            if problem:
+                by_problem.setdefault(problem, set()).add(c)
+        for problem in sorted(by_problem):
+            reasons.append("{}: {}".format(problem, listing(by_problem[problem])))
         if len(name.encode("utf-8", "replace")) > NAME_BYTES:
             reasons.append("longer than {} bytes".format(NAME_BYTES))
 
@@ -354,9 +434,9 @@ def _report_names(problems):
     for where, name, why in problems:
         sys.stderr.write("  {:<{w}}  {!r:<20} {}\n".format(where, name, why, w=width))
     sys.stderr.write(
-        "\nNames hold {} bytes. Punctuation is fine, but a backslash, an\n"
-        "apostrophe or a control character is truncated when the name is read\n"
-        "back, and a non-ASCII character cannot be encoded at all.\n"
+        "\nNames hold {} bytes. The characters above were measured against the\n"
+        "engine in use, not assumed: a patched or newer zoia_lib accepts more\n"
+        "of them than an unpatched one.\n"
         "Rename them, or pass --force to write the patch anyway.\n".format(NAME_BYTES)
     )
 
@@ -368,18 +448,21 @@ def cmd_decode(args):
 
     # Refuse before writing anything: a patch that cannot be rebuilt must not
     # become the starting point of an edit.
-    problem = _fidelity_problem(raw, patch)
+    problem, causes = _fidelity_problem(raw, patch)
     if problem:
         sys.stderr.write(
             "error: {} cannot be written back faithfully "
             "({}).\n\n".format(args.input, problem)
         )
+        if causes:
+            sys.stderr.write("What would change:\n")
+            for cause in causes:
+                sys.stderr.write("  - {}\n".format(cause))
+            sys.stderr.write("\n")
         sys.stderr.write(
-            "Editing it would produce a file the pedal may refuse, so decoding\n"
-            "is refused. The usual cause is a patch saved before firmware 1.10:\n"
-            "it has no module colour section and uses a compact module layout\n"
-            "the encoder cannot rebuild.\n\n"
-            "Re-save the patch on the pedal to convert it, then decode again.\n"
+            "Writing this patch back would silently alter it, so decoding is\n"
+            "refused. Re-saving the patch on the pedal usually converts it to a\n"
+            "layout the encoder can rebuild.\n"
             "`info` and `roundtrip` still work on it.\n"
         )
         return 2

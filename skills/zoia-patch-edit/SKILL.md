@@ -87,19 +87,23 @@ regenerating it wholesale.
 
 ## Fidelity
 
-The encoder round-trips **byte-exact**: `roundtrip` reports `0` differing
-bytes, the result re-decodes cleanly, and the re-decoded dict equals the
-original. An unmodified decode→encode is a no-op, so any byte that changes is
-a byte your edit changed.
+On a patch the engine fully supports, a decode→encode is a **no-op**:
+`roundtrip` reports `0` differing bytes and the re-decoded dict equals the
+original. So any byte that changes is a byte your edit changed.
+
+**Not every patch is supported.** Measured over a 216-patch collection, 86%
+round-trip byte-exact with a current engine — and only 30% with an unpatched
+zoia_lib, because it drops page names, out-of-range page numbers and undescribed
+option bytes. Older patches use layouts the encoder cannot rebuild at all.
 
 Still worth doing:
 
 - `decode` **refuses** a patch that does not survive a round-trip, and writes
-  no JSON. Patches saved before firmware 1.10 have no module colour section and
-  use a compact module layout the encoder cannot rebuild, so anything written
-  back would be corrupt. Do not try to work around it: report it to the user
-  and ask them to re-save the patch on the pedal, which converts it. `info` and
-  `roundtrip` still work on such a patch, for inspection.
+  no JSON — writing it back would silently alter it. The error lists which
+  fields would change. Do not try to work around it: report it to the user and
+  ask them to re-save the patch on the pedal, which usually converts it to a
+  layout the encoder handles. `info` and `roundtrip` still work on such a
+  patch, for inspection.
 - Run `roundtrip` on a `.bin` you have not worked with before — one command,
   and it proves the patch is in the supported format.
 - Keep a `.bak` of the original before overwriting anything.
@@ -193,9 +197,12 @@ after an edit* means the edit was ignored — not that it succeeded.
 ## Naming
 
 Patch, module and page names live in fixed **16-byte** fields. Ordinary
-punctuation is fine — of the 95 printable ASCII characters, 93 survive a
-round-trip intact, including `/`, `!`, `&` and `"`. Two of them do not, and
-non-ASCII is a separate problem.
+punctuation is fine — including `/`, `!`, `&` and `"`.
+
+Which characters actually survive depends on the engine, so `encode` measures
+it rather than assuming: it encodes a witness name per class of character and
+checks whether it reads back. On an unpatched zoia_lib the two failures below
+apply; on a patched or newer one they may not, and the check adapts.
 
 **Reading** — the parser does not decode the bytes, it string-splits their
 Python `repr()`. Everything `repr` escapes therefore truncates the name: a
