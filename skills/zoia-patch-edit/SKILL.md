@@ -157,6 +157,8 @@ honest.
 | a parameter | `parameters_raw[i]` | `parameters` |
 | a module colour | `colors[module_number]` **and** `header_color_id` | `color` |
 | an option | `options_binary` | `options` |
+| a page name | `pages_raw[i]` | `pages` |
+| a starred param | `block_raw` | `block` |
 | a connection | `strength_raw`, `source_raw`, `source_block_raw`, `dest_raw`, `dest_block_raw` | `source`, `destination`, `strength` |
 
 **Parameters.** `parameters_raw` is positional: index `i` is the *i*-th block of
@@ -180,6 +182,13 @@ top-level `colors` list at the end of the file. When `len(colors) ==
 len(modules)` the list wins, so changing only `header_color_id` has no visible
 effect. Set `colors[module["number"]]` as well, using the palette ids below
 (Blue = 1 … Mango = 15).
+
+**Page names** live in `pages_raw`, which holds every name the file stores.
+`pages` is the display list, trimmed to the last page that holds a module — so
+it is often *shorter*, and a page carrying only a credit line has no index in
+it at all. Rename in `pages_raw`, and keep `pages` in step when the index
+exists. Adding a page means appending to `pages_raw` **and** incrementing
+`pages_count_raw`.
 
 **Connections** encode from the `_raw` fields whenever `strength_raw` is
 present, which it always is after a decode. `strength_raw` is *not*
