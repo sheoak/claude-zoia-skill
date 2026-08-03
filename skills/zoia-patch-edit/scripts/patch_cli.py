@@ -34,7 +34,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import struct
 import subprocess
 import sys
@@ -45,9 +44,10 @@ ZOIA_LIB_REPO = "https://github.com/meanmedianmoge/zoia_lib.git"
 # exactly one file.
 SLOT_RE = re.compile(r"^(\d{3})_zoia_(.+)\.bin$", re.IGNORECASE)
 
-# The pedal only stores these characters in patch, module and page names, in a
-# fixed 16-byte field. Anything else is mangled or fails to encode.
-NAME_RE = re.compile(r"^[A-Za-z0-9 .-]*$")
+# Names live in a fixed 16-byte field. Punctuation is fine — of the 95 printable
+# ASCII characters only these two are mangled, because the parser string-splits
+# the repr() of the bytes. Non-ASCII is unsafe too: it fails to encode outright.
+NAME_MANGLED = "\\'"
 NAME_BYTES = 16
 
 # Paths on the command line are relative to where the user invoked us, but the
@@ -160,6 +160,44 @@ def _read_bin(path):
         return f.read()
 
 
+def _parse_bin(path):
+    """Read and parse a .bin, reporting a bad file instead of a traceback."""
+    try:
+        raw = _read_bin(path)
+    except OSError as e:
+        sys.stderr.write("error: cannot read {} ({}).\n".format(path, e.strerror))
+        raise SystemExit(2)
+
+    if len(raw) < 24:
+        sys.stderr.write(
+            "error: {} is {} bytes — too short to be a ZOIA patch "
+            "(they are 32768).\n".format(path, len(raw))
+        )
+        raise SystemExit(2)
+
+    try:
+        return raw, PatchBinary().parse_data(raw)
+    except Exception as e:  # noqa: BLE001 - any parse failure is a bad file
+        sys.stderr.write(
+            "error: {} could not be parsed as a ZOIA patch "
+            "({}: {}).\n".format(path, type(e).__name__, e)
+        )
+        raise SystemExit(2)
+
+
+def _write_bin(path, data):
+    """Write a patch, leaving the target untouched if anything goes wrong."""
+    tmp = path + ".partial"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
 def _summary_lines(patch):
     """Return a list of human-readable lines describing a parsed patch."""
     meta = patch.get("meta", {})
@@ -242,13 +280,16 @@ def _check_names(patch):
     """
     problems = []
 
+    def unsafe(c):
+        return c in NAME_MANGLED or not (0x20 <= ord(c) <= 0x7E)
+
     def check(where, name):
         if not isinstance(name, str):
             return
-        if not NAME_RE.match(name):
-            bad = sorted({c for c in name if not NAME_RE.match(c)})
+        bad = sorted({c for c in name if unsafe(c)})
+        if bad:
             problems.append(
-                (where, name, "not allowed: " + " ".join(repr(c) for c in bad))
+                (where, name, "mangled by the parser: " + " ".join(repr(c) for c in bad))
             )
         elif len(name.encode("utf-8", "replace")) > NAME_BYTES:
             problems.append(
@@ -271,8 +312,9 @@ def _report_names(problems):
     for where, name, why in problems:
         sys.stderr.write("  {:<{w}}  {!r:<20} {}\n".format(where, name, why, w=width))
     sys.stderr.write(
-        "\nNames hold {} characters, from A-Z a-z 0-9, space, dash and dot.\n"
-        "Anything else is silently mangled when read back, or fails to encode.\n"
+        "\nNames hold {} bytes. Punctuation is fine, but a backslash or an\n"
+        "apostrophe is truncated when the name is read back, and a non-ASCII\n"
+        "character cannot be encoded at all.\n"
         "Rename them, or pass --force to write the patch anyway.\n".format(NAME_BYTES)
     )
 
@@ -280,8 +322,7 @@ def _report_names(problems):
 def cmd_decode(args):
     load_engine()
     in_path = _abs(args.input)
-    raw = _read_bin(in_path)
-    patch = PatchBinary().parse_data(raw)
+    raw, patch = _parse_bin(in_path)
     out_path = _abs(args.output) or (in_path.rsplit(".", 1)[0] + ".json")
     with open(out_path, "w") as f:
         json.dump(patch, f, indent=2)
@@ -305,9 +346,7 @@ def cmd_encode(args):
 
     out_path = _abs(args.output) or (in_path.rsplit(".", 1)[0] + ".bin")
     try:
-        data = PatchEncoder().encode(
-            patch, output_path=out_path, param_order_mode=args.param_order
-        )
+        data = PatchEncoder().encode(patch, param_order_mode=args.param_order)
     except struct.error as e:
         sys.stderr.write("error: the encoder could not write this patch ({}).\n".format(e))
         sys.stderr.write(
@@ -316,13 +355,14 @@ def cmd_encode(args):
             "'é' costs two.\n"
         )
         return 1
+    _write_bin(out_path, data)
     print("Encoded {} -> {} ({} bytes)".format(args.input, out_path, len(data)))
     return 0
 
 
 def cmd_info(args):
     load_engine()
-    patch = PatchBinary().parse_data(_read_bin(_abs(args.input)))
+    _, patch = _parse_bin(_abs(args.input))
     print("\n".join(_summary_lines(patch)))
     return 0
 
@@ -330,8 +370,7 @@ def cmd_info(args):
 def cmd_roundtrip(args):
     """Decode then re-encode a .bin and report how faithfully it reproduces."""
     load_engine()
-    original = _read_bin(_abs(args.input))
-    patch = PatchBinary().parse_data(original)
+    original, patch = _parse_bin(_abs(args.input))
     encoded = bytes(PatchEncoder().encode(patch, param_order_mode=args.param_order))
 
     print("original bytes: {}".format(len(original)))
@@ -457,8 +496,7 @@ def cmd_sync(args):
 
     # Never put a file on the pedal that we cannot read back ourselves.
     load_engine()
-    raw = _read_bin(src)
-    patch = PatchBinary().parse_data(raw)
+    raw, patch = _parse_bin(src)
 
     base = os.path.basename(src)
     slot = args.slot if args.slot is not None else _slot_of(base)
@@ -513,7 +551,7 @@ def cmd_sync(args):
         print("\ndry run - nothing written")
         return 0
 
-    shutil.copyfile(src, dest)
+    _write_bin(dest, raw)
 
     written = _read_bin(dest)
     if written != raw:

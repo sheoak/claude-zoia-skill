@@ -127,7 +127,9 @@ A **module** looks like:
 ```
 
 A **connection**: `{"source": "0.1", "destination": "0.0", "strength": 0}`
-where `"module.block"` addresses a block, and `strength` is 0-100.
+where `"module.block"` addresses a block. `strength` is a **percentage from 0 to
+999**, not a 0-100 fraction: above 100 the CV is amplified, below it is
+attenuated. A destination sums everything wired into it.
 
 `pages` is a list of page-name strings. `meta` is a computed summary
 (regenerated on decode; you don't need to hand-edit it).
@@ -178,25 +180,29 @@ after an edit* means the edit was ignored — not that it succeeded.
 
 ## Naming
 
-Patch, module and page names live in fixed 16-byte fields, and the pedal only
-stores `A-Z`, `a-z`, `0-9`, space, dash and dot. Stay inside that set.
+Patch, module and page names live in fixed **16-byte** fields. Ordinary
+punctuation is fine — of the 95 printable ASCII characters, 93 survive a
+round-trip intact, including `/`, `!`, `&` and `"`. Two of them do not, and
+non-ASCII is a separate problem.
 
-The parser reads a name by string-splitting the `repr()` of its bytes, so
-anything else is silently mangled on the way back:
+**Reading** — the parser does not decode the bytes, it string-splits their
+Python `repr()`. A backslash or an apostrophe therefore truncates the name:
 
-| written | read back |
+| stored in the field | read back |
 | :-- | :-- |
 | `Don't Panic` | `t Panic` |
-| `Café` | `Caf` |
 | `A\B` | `A` |
 
-A non-ASCII character is worse still: the encoder counts characters but writes
-bytes, so it raises `struct.error` and writes nothing.
+**Writing** — a non-ASCII character cannot be encoded at all. The encoder sizes
+the field in characters but fills it with UTF-8 bytes, so `é` raises
+`struct.error` and no patch is produced.
 
-`encode` checks this for you and refuses, listing the offending names; `--force`
-bypasses the check but cannot save a non-ASCII name. Unlike the grid and raw-field
-traps, `roundtrip` *does* catch this one — a mangled name re-encodes to different
-bytes, so the patch is no longer byte-exact.
+`encode` checks all three cases and refuses, listing the offending names.
+`--force` overrides it — useful when you know a name is safe — but it cannot
+rescue a non-ASCII name, since the failure is in the encoder itself.
+
+Unlike the grid and raw-field traps, `roundtrip` *does* catch a mangled name:
+it re-encodes to different bytes, so the patch stops being byte-exact.
 
 ## Grid layout
 
