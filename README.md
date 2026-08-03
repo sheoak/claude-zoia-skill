@@ -53,19 +53,28 @@ nothing needs installing beyond the clone.
 
 ## Per-patch repositories
 
-Drop this in the `CLAUDE.md` of each patch repo so Claude knows where the skill
-lives:
+Each patch repo declares the skill in its own `.claude/settings.json`, so
+opening the repo is enough — no per-repo path, and nothing to install by hand:
 
-```markdown
-ZOIA patches in this repo are edited with the zoia-patch-edit skill:
-https://github.com/sheoak/claude-zoia-skill
-
-If it is not installed:
-    /plugin marketplace add sheoak/claude-zoia-skill
-    /plugin install zoia-patch-edit@zoia-tools
+```json
+{
+  "extraKnownMarketplaces": {
+    "zoia-tools": {
+      "source": { "source": "github", "repo": "sheoak/claude-zoia-skill" }
+    }
+  },
+  "enabledPlugins": {
+    "zoia-patch-edit@zoia-tools": true
+  }
+}
 ```
 
-A ready-made copy is in [`templates/CLAUDE.md`](templates/CLAUDE.md).
+Copy [`templates/settings.json`](templates/settings.json) to
+`.claude/settings.json`, and optionally [`templates/CLAUDE.md`](templates/CLAUDE.md)
+to tell Claude what the `.bin` files in the repo are.
+
+Claude Code prompts you to install the marketplace the first time you trust the
+folder. The engine clone is shared, so only the first repo pays for it.
 
 ## CLI
 
@@ -78,7 +87,27 @@ patch_cli.py info      patch.bin        # human-readable summary
 patch_cli.py decode    patch.bin patch.json
 patch_cli.py encode    patch.json out.bin
 patch_cli.py roundtrip patch.bin        # prove decode->encode is lossless
+
+patch_cli.py sd /Volumes/CARD/ZOIA      # register the SD patch folder, once
+patch_cli.py sd                         # show it, and whether the card is mounted
+patch_cli.py sync   patch.bin           # copy it onto the card, into its slot
 ```
+
+## Syncing to the SD card
+
+Register the folder that holds the patches — not the root of the card — and it
+is remembered in `~/.config/claude-zoia-skill/config.json`. Afterwards `sync`
+copies a `.bin` into its slot.
+
+The slot comes from the filename (`003_zoia_The_Hierophant.bin`), or from
+`--slot N`. A slot holds exactly one file, so `sync` overwrites the file already
+there and keeps its name; renaming with `--name` has to delete the old file and
+therefore requires `--replace`. `--dry-run` shows the plan without touching the
+card.
+
+Before copying, `sync` parses the patch, and afterwards it reads the written
+file back and compares it — a `.bin` the pedal could not read never lands on the
+card.
 
 ## Caveat
 

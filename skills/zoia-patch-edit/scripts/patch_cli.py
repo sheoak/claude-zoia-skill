@@ -33,10 +33,16 @@ worked with before to confirm, and keep a backup before overwriting.
 import argparse
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 
 ZOIA_LIB_REPO = "https://github.com/meanmedianmoge/zoia_lib.git"
+
+# Patches on a ZOIA SD card are named <slot>_zoia_<name>.bin, and a slot holds
+# exactly one file.
+SLOT_RE = re.compile(r"^(\d{3})_zoia_(.+)\.bin$", re.IGNORECASE)
 
 # Paths on the command line are relative to where the user invoked us, but the
 # engine only finds its schemas when the process runs from the zoia_lib root,
@@ -56,6 +62,29 @@ def _cache_root():
 
 def _default_engine_path():
     return os.path.join(_cache_root(), "zoia_lib")
+
+
+def _config_path():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config"
+    )
+    return os.path.join(base, "claude-zoia-skill", "config.json")
+
+
+def _load_config():
+    try:
+        with open(_config_path()) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_config(cfg):
+    path = _config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
 
 
 def _looks_like_zoia_lib(path):
@@ -279,6 +308,160 @@ def cmd_roundtrip(args):
     return 0 if byte_exact else 1
 
 
+def _sanitize(name):
+    """Turn a patch name into the filename form the ZOIA uses on its card."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", (name or "").strip())
+    return cleaned.strip("_") or "patch"
+
+
+def _slot_of(filename):
+    m = SLOT_RE.match(filename)
+    return int(m.group(1)) if m else None
+
+
+def cmd_sd(args):
+    """Register (or show) the ZOIA patch folder on the SD card."""
+    cfg = _load_config()
+
+    if not args.path:
+        current = cfg.get("sd_path")
+        if not current:
+            print("No SD patch folder registered.")
+            print("Register one with:")
+            print("    patch_cli.py sd /Volumes/<CARD>/<zoia patch folder>")
+            return 2
+        print("SD patch folder: {}".format(current))
+        if os.path.isdir(current):
+            patches = sorted(f for f in os.listdir(current) if SLOT_RE.match(f))
+            print("status:          mounted, {} patch(es)".format(len(patches)))
+        else:
+            print("status:          NOT AVAILABLE (card unmounted, or folder gone)")
+        print("config:          {}".format(_config_path()))
+        return 0
+
+    path = os.path.abspath(_abs(args.path))
+    if not os.path.isdir(path):
+        sys.stderr.write("error: {} is not a directory.\n".format(path))
+        sys.stderr.write(
+            "Give the folder holding the patches, not the root of the card.\n"
+        )
+        return 2
+
+    patches = [f for f in os.listdir(path) if SLOT_RE.match(f)]
+    if not patches and not args.force:
+        sys.stderr.write(
+            "error: no <slot>_zoia_<name>.bin file in {}.\n".format(path)
+        )
+        sys.stderr.write(
+            "This does not look like the ZOIA patch folder. Check the path, or\n"
+            "re-run with --force to register it anyway.\n"
+        )
+        return 2
+
+    cfg["sd_path"] = path
+    _save_config(cfg)
+    print("Registered SD patch folder: {}".format(path))
+    print("{} patch(es) currently on the card.".format(len(patches)))
+    print("Saved to {}".format(_config_path()))
+    return 0
+
+
+def cmd_sync(args):
+    """Copy a .bin onto the registered SD patch folder, into its slot."""
+    src = _abs(args.input)
+    if not os.path.isfile(src):
+        sys.stderr.write("error: {} does not exist.\n".format(src))
+        return 2
+
+    folder = _abs(args.folder) if args.folder else _load_config().get("sd_path")
+    if not folder:
+        sys.stderr.write(
+            "error: no SD patch folder registered.\n"
+            "Register it once with:  patch_cli.py sd /Volumes/<CARD>/<folder>\n"
+        )
+        return 2
+    folder = os.path.abspath(folder)
+    if not os.path.isdir(folder):
+        sys.stderr.write(
+            "error: {} is not available.\n"
+            "Is the card mounted? Check with `patch_cli.py sd`.\n".format(folder)
+        )
+        return 2
+
+    # Never put a file on the pedal that we cannot read back ourselves.
+    load_engine()
+    raw = _read_bin(src)
+    patch = PatchBinary().parse_data(raw)
+
+    base = os.path.basename(src)
+    slot = args.slot if args.slot is not None else _slot_of(base)
+    if slot is None:
+        sys.stderr.write(
+            "error: cannot tell which slot {} belongs to.\n"
+            "Name it <slot>_zoia_<name>.bin, or pass --slot N.\n".format(base)
+        )
+        return 2
+    if not 0 <= slot <= 63:
+        sys.stderr.write("error: slot {} is outside 0-63.\n".format(slot))
+        return 2
+
+    occupying = sorted(f for f in os.listdir(folder) if _slot_of(f) == slot)
+
+    if args.name:
+        target = "{:03d}_zoia_{}.bin".format(slot, _sanitize(args.name))
+    elif _slot_of(base) == slot:
+        target = base
+    elif occupying:
+        # Keep whatever the slot is already called, so nothing has to be deleted.
+        target = occupying[0]
+    else:
+        target = "{:03d}_zoia_{}.bin".format(slot, _sanitize(patch.get("name")))
+
+    dest = os.path.join(folder, target)
+    stale = [f for f in occupying if f != target]
+
+    print("patch:   {} ({} modules)".format(patch.get("name"), len(patch.get("modules", []))))
+    print("slot:    {:03d}".format(slot))
+    print("target:  {}".format(dest))
+    if os.path.exists(dest):
+        print("         (overwrites the file already there)")
+    for f in stale:
+        print("removes: {}".format(os.path.join(folder, f)))
+
+    if stale and not args.replace:
+        sys.stdout.flush()
+        sys.stderr.write(
+            "\nerror: slot {:03d} is already taken by {}.\n".format(
+                slot, ", ".join(stale)
+            )
+        )
+        sys.stderr.write(
+            "A slot holds one patch, so writing under a new name means deleting\n"
+            "the old file. Re-run with --replace to do that, or drop --name to\n"
+            "overwrite the existing file in place.\n"
+        )
+        return 2
+
+    if args.dry_run:
+        print("\ndry run - nothing written")
+        return 0
+
+    shutil.copyfile(src, dest)
+
+    written = _read_bin(dest)
+    if written != raw:
+        sys.stderr.write(
+            "error: {} does not match the source after copying.\n".format(dest)
+        )
+        return 1
+
+    for f in stale:
+        os.remove(os.path.join(folder, f))
+
+    print("\nSynced and verified. Eject the card before unplugging it.")
+    return 0
+
+
 def cmd_where(args):
     """Report which engine checkout would be used, for troubleshooting."""
     root = find_engine()
@@ -331,6 +514,35 @@ def build_parser():
     r.add_argument("--param-order", default="order", choices=["order", "saved"])
     r.add_argument("--max-ranges", type=int, default=20, help="diff ranges to show")
     r.set_defaults(func=cmd_roundtrip)
+
+    sd = sub.add_parser(
+        "sd", help="register (or show) the ZOIA patch folder on the SD card"
+    )
+    sd.add_argument(
+        "path",
+        nargs="?",
+        help="folder holding the patches, e.g. /Volumes/CARD/ZOIA "
+        "(not the root of the card). Omit to show the current setting.",
+    )
+    sd.add_argument(
+        "--force",
+        action="store_true",
+        help="register even if no patch file is found there",
+    )
+    sd.set_defaults(func=cmd_sd)
+
+    sy = sub.add_parser("sync", help="copy a .bin onto the SD card, into its slot")
+    sy.add_argument("input", help="path to the .bin patch")
+    sy.add_argument("--slot", type=int, help="target slot 0-63 (default: from filename)")
+    sy.add_argument("--name", help="rename the patch on the card (needs --replace)")
+    sy.add_argument(
+        "--replace",
+        action="store_true",
+        help="delete the file already occupying the slot under another name",
+    )
+    sy.add_argument("--folder", help="write here instead of the registered folder")
+    sy.add_argument("--dry-run", action="store_true", help="show what would happen")
+    sy.set_defaults(func=cmd_sync)
 
     w = sub.add_parser("where", help="show which engine checkout is in use")
     w.set_defaults(func=cmd_where)

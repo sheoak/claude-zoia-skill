@@ -55,6 +55,32 @@ python3 "$CLI" encode patch.json out.bin
 python3 "$CLI" roundtrip patch.bin
 ```
 
+## Copying a patch to the SD card
+
+The card's patch folder is registered once, then `sync` writes into it:
+
+```bash
+python3 "$CLI" sd                       # show the registered folder and whether it is mounted
+python3 "$CLI" sd /Volumes/CARD/ZOIA    # register it (the patch folder, not the card root)
+python3 "$CLI" sync patch.bin           # copy into the slot its filename says
+python3 "$CLI" sync patch.bin --slot 3  # or name the slot explicitly
+```
+
+`sync` parses the `.bin` before copying and compares the bytes afterwards, so a
+file the pedal cannot read never reaches the card.
+
+Rules to respect:
+
+- A slot holds exactly one file. By default `sync` overwrites the file already
+  in that slot, keeping its name — nothing is deleted.
+- Renaming (`--name`) means deleting the slot's old file, so it requires
+  `--replace`. Do not pass `--replace` unless the user asked for the rename.
+- Use `--dry-run` first when you are unsure which file you are about to
+  overwrite, and show the user the plan.
+- If the folder is missing, the card is unmounted — say so rather than
+  registering a different path.
+- Tell the user to eject the card before unplugging it.
+
 The JSON is exactly the dict produced by the parser, so `encode` reads back
 anything `decode` wrote. Prefer targeted `Edit` calls on the JSON over
 regenerating it wholesale.
