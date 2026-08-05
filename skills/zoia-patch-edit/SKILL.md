@@ -283,6 +283,101 @@ maps onto, and gain-like params are in **dB**: a VCA's `level_control` has
 `1.0` is unity. Setting a pass-through level to "half" buries the signal. Check
 the `unit` before assuming a value is linear.
 
+## ⚠️ The module index is not ground truth — check it against real patches
+
+`ModuleIndex.json` is the best description of the modules that exists, and it is
+wrong often enough to break a patch silently. A block's `position` **is** its
+connection index and an option's place in its list **is** the byte written to the
+file, so an error there does not raise: the patch encodes, round-trips byte-exact,
+loads on the pedal, and the connection quietly goes nowhere or the module runs on
+the wrong setting.
+
+There is a way to check, and it is cheap. Decode a corpus of real patches and count
+how each block is used:
+
+- a block used as a **connection source** has to be an output;
+- a block used as a **destination** has to be an input;
+- a block index used by real patches but declared empty (or past the end) is a
+  block the index has misplaced.
+
+Patch corpora usually on hand: the Librarian's own store at
+`~/Library/Application Support/.ZoiaLibraryApp/**/*.bin`, and any SD backup. A few
+thousand patches settle most questions in seconds.
+
+Errors found this way so far, all now fixed upstream in `sheoak/zoia_lib`:
+
+| module | was | really |
+| --- | --- | --- |
+| `Sequencer` | `out_track_1..8` at 36-43, `key_input_note/gate` at 34/35 | outputs at **34-41**; `key_input` is a MIDI mode and holds no block |
+| `Tremolo` | `depth` 5, outputs 6/7 | `depth` **4**, outputs **5/6**; `direct` shares `depth`'s slot |
+| `Audio In Switch` | `audio_input_9..14` two too high | inputs 1-16 at 0-15, contiguous |
+| `Delay Line` | `max_time` as `1s…16s,100ms` | the list **starts** with `100ms` |
+| `Delay w/Mod` | knob order | `mix 2, feedback 3, delay_time 4, tap_tempo_in 5, mod_rate 6, mod_depth 7` |
+
+Some oddities are real and must be left alone: `Pushbutton` and both
+`Euro Pushbutton`s genuinely have no block at position 0 — their `cv_output` is a
+source 17195 times and block 0 never is. Measure before "fixing".
+
+### A hidden block still has its index
+
+The decoder trims each module's `blocks` dict to what is **visible on the grid**,
+which depends on the options. Visibility is a grid concern only: a hidden block
+keeps its connection index and can still be wired. A `tap`-mode `Clock Divider`
+shows no `divisor`, and 37 corpus patches drive it anyway. Resolve block indices
+from `ModuleIndex.json`, never from a decoded module's own `blocks`.
+
+### Which option byte is which
+
+Options are written in the order the index lists them, one byte each. To confirm a
+byte's identity, find one whose value changes the **number of visible blocks** —
+that count is stored in the file independently, so it is checkable. For
+`Delay Line`, byte 1 alone tracks it (0 → three blocks, 1 → four), which pins
+`tap_tempo_in` and with it the position of every other option.
+
+For a byte that reveals nothing structurally, compare the population that *cares*
+against the one that does not. `Delay Line` byte 3 (`CV Input`) is set in 57.8% of
+delay lines whose `delay_time` is driven by a connection against 13.5% of those
+left alone — a 4.3× split, where byte 2 shows none.
+
+### Restrict the statistics to the population you are in
+
+That last trick cuts both ways. "57.8% of CV-driven delay lines use linear" is
+true and was the wrong answer for a chorus, because that population is mostly long
+delays where linear is what makes a tap tempo read in milliseconds. Narrowed to
+*short* delay lines modulated by an LFO — 192 of them — the answer is unanimously
+the other way. Ask the question about patches doing what you are doing.
+
+## Building a patch from scratch
+
+Do not synthesise module records. Harvest them: decode a corpus, keep one real
+instance per `(mod_idx, options)` you need, and clone it. Every `size`, `params`
+count and `saved_data` block is then one the pedal already writes.
+
+- A current-format record satisfies `size == 14 + params + data_words` with
+  `len(saved_data) == data_words * 4`. Anything else is an old short record with no
+  name field — filter those out or the encoder will refuse them.
+- `size_of_saveable_data` is a literal field, not a length the encoder derives.
+  Keep the harvested value.
+- Supply `parameters_raw`, not `parameters`. The decoder names parameters by block
+  **position** order while the encoder's by-name path uses the index's `order`, and
+  the two disagree for enough modules that by-name round-trips fail on more than
+  half a corpus. Build the list indexed by position-sorted param blocks.
+- Assert the grid yourself as you go: nothing past cell 39, no overlaps, each
+  module's cells contiguous from its minimum.
+- Then verify what you built the same way you verified the index: every connection's
+  source block should be one the corpus uses as a source, every destination one it
+  uses as a destination.
+
+### Copy the numbers from patches that already work
+
+Ranges and strengths are where a structurally perfect patch still sounds wrong, and
+the corpus has the answers. A ZOIA chorus, for instance: `Delay Line` on the short
+range with the **exponential** CV curve, the base delay held in the `delay_time`
+**parameter** (0.10 to 0.86 across the ones sampled), and the LFO landing on
+`delay_time` at **53% to 92%** — not through a chain of attenuators at 6%, which is
+a tenth of a semitone and inaudible. Sample the patches that do the thing before
+choosing a number.
+
 ## Color palette
 
 Header colors (name used in JSON): Blue, Green, Red, Yellow, Aqua, Magenta,
