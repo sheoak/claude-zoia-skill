@@ -137,9 +137,10 @@ A **module** looks like:
 ```
 
 A **connection**: `{"source": "0.1", "destination": "0.0", "strength": 0}`
-where `"module.block"` addresses a block. `strength` is a **percentage from 0 to
-999**, not a 0-100 fraction: above 100 the CV is amplified, below it is
-attenuated. A destination sums everything wired into it.
+where `"module.block"` addresses a block. A destination **sums** everything wired
+into it. `strength` is a percentage where 100 is unity and the ceiling is 398 — but
+it is **stored logarithmically**, and the decoded `strength` field is not it. See
+"Connection strength is logarithmic" below before writing one.
 
 `pages` is a list of page-name strings. `meta` is a computed summary
 (regenerated on decode; you don't need to hand-edit it).
@@ -235,6 +236,64 @@ rescue a non-ASCII name, since the failure is in the encoder itself.
 
 Unlike the grid and raw-field traps, `roundtrip` *does* catch a mangled name:
 it re-encodes to different bytes, so the patch stops being byte-exact.
+
+## ⚠️ Connection strength is logarithmic
+
+The single easiest way to build a patch that loads, round-trips byte-exact, and does
+nothing audible. `strength_raw` is **not** hundredths of a percent:
+
+```
+percent      = 100 * 10 ** ((strength_raw - 10000) / 2000)
+strength_raw = round(10000 + 2000 * log10(percent / 100))
+```
+
+2000 raw units per decade:
+
+| raw | on the pedal | | raw | on the pedal |
+| --- | --- | --- | --- | --- |
+| 0 | ~0% | | 9750 | 75% |
+| 7398 | 5% | | **10000** | **100%** |
+| 8000 | 10% | | 10602 | 200% |
+| 8796 | 25% | | **11200** | **398.1%** — the ceiling |
+| 9398 | 50% | | | |
+
+The corpus confirms it: of 198612 connections, 81.2% sit at raw 10000, and the next
+most common values are 9398, 8000, 8796, 9750 and 7398 — exactly the round
+percentages 50, 10, 25, 75 and 5.
+
+`zoia_lib` reports `strength = int(raw / 100)`, so a connection it calls "60" really
+applies **1%**. Writing `strength_raw = percent * 100` is the same error in reverse:
+
+| written as | raw | what the pedal applies |
+| --- | --- | --- |
+| "6%" | 600 | **0.002%** |
+| "20%" | 2000 | **0.01%** |
+| "35%" | 3500 | **0.056%** |
+| "60%" | 6000 | **1%** |
+| "100%" | 10000 | 100% — right by coincidence |
+
+That failure is silent *and* asymmetric, which is what makes it so hard to see: every
+full-strength connection comes out correct, so the patch half works, while every
+dosed one is written between a hundred and a thousand times too quiet. A chorus built
+that way modulates the delay by a tenth of a semitone and sounds like a dry bypass.
+
+Convert explicitly, and verify a built patch by converting back.
+
+### Sizing a strength
+
+A connection delivers `source × percent/100` and **sums** with the destination
+parameter's own value, so size it against what the destination needs rather than
+picking it as a volume:
+
+- `atten` on a `CV Mixer` spans −1…+1 with its parameter at 0.5, so +0.5 opens it
+  fully — a 0…1 knob gets there at **50%**.
+- an LFO onto a `Delay Line`'s `delay_time` for a chorus wants **53–92%**, the band
+  the 192 corpus patches doing it use.
+- above 100% is legal up to 398%, and 2% of corpus connections go there.
+
+Doing this with strength costs no CPU and leaves no module to maintain, so prefer it
+to inserting a `Multiplier`. Reach for one only when a **knob** has to move the amount
+while playing, since a strength is fixed at edit time.
 
 ## Grid layout
 
