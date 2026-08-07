@@ -204,6 +204,35 @@ and never derive it from `strength`.
 changed. A `roundtrip`-style byte comparison that reports *0 differing bytes
 after an edit* means the edit was ignored — not that it succeeded.
 
+### ⚠️ `saved_data` is runtime state, and it persists
+
+`saved_data` is not configuration. It is what the module was *doing* when the patch
+was saved, and the pedal restores it. Harvesting a template therefore imports a
+stranger's runtime state:
+
+| module | what its `saved_data` holds |
+| :-- | :-- |
+| `CV Flip Flop` | **its state.** `[1,0,0,0]` is *set* |
+| `ADSR` | stage flags |
+| `LFO` | a float, its phase or accumulator |
+| `Value` | its last value |
+| `Tap to CV`, `Clock Divider` | the tempo they had measured |
+
+The corpus instance you harvest a `CV Flip Flop` from usually has it set, so every
+toggle you build from that template comes up **on**: a menu that opens itself, a
+sync that engages itself, a bypass that starts bypassed. Zero it deliberately, and
+**by module rather than by type** — some toggles should start on:
+
+```python
+if name in SAVED_CLEAR:
+    m["saved_data"] = [0] * len(m["saved_data"])
+```
+
+Symptoms this explains, all of which look like something else: a patch that "boots
+into" a mode, a switch whose first press does nothing (it was already on), an LFO
+whose rate is right but whose phase is not. Before building a workaround for any of
+those, read `saved_data`.
+
 ## Naming
 
 Patch, module and page names live in fixed **16-byte** fields. Ordinary
@@ -278,6 +307,29 @@ dosed one is written between a hundred and a thousand times too quiet. A chorus 
 that way modulates the delay by a tenth of a semitone and sounds like a dry bypass.
 
 Convert explicitly, and verify a built patch by converting back.
+
+### A parameter block sums its knob with its cables, and clamps
+
+A connection into a parameter block adds `source × strength` **to that block's own
+knob value**, and the result is bounded by the parameter's range. Two consequences
+worth knowing before you reach for extra modules:
+
+- **You get free arithmetic.** To multiply a signal by `1 + x`, put `1` in a
+  `Multiplier`'s second input as its *knob* and wire `x` into the same block. No
+  `CV Mixer`, no constant module.
+- **You cannot exceed the top.** A block bounded at `[0,1]` sitting at 1.0 clips
+  anything positive you send it, whatever the source's own range — so a bipolar
+  modulation centred on unity loses its upper half. Centre it lower and pay the
+  difference back **upstream**, where a strength may exceed 100%.
+- **A parameter reading 0.0 may be perfectly correct** if a cable drives it. Do not
+  "fix" it without checking what arrives.
+
+Two traps in the same family:
+
+- `CV Mixer`'s `atten` runs −1 to +1 with **0.5 as zero**. Left at the harness
+  default of 0.0 it is a *full inversion*, which is silent-looking and audible.
+- A `-1 to 1` source into a `[0,1]` block loses its negative half. Check the
+  destination's range, not the source's.
 
 ### Sizing a strength
 
@@ -373,6 +425,14 @@ Errors found this way so far, all now fixed upstream in `sheoak/zoia_lib`:
 | `Delay Line` | `max_time` as `1s…16s,100ms` | the list **starts** with `100ms` |
 | `Delay w/Mod` | knob order | `mix 2, feedback 3, delay_time 4, tap_tempo_in 5, mod_rate 6, mod_depth 7` |
 
+**Fixes go in as pull requests, and nothing else does.** Do not commit onto a
+branch of the fork, do not merge, do not rebase a shared branch and do not push
+one. Open a PR and let the owner decide. Committing "helpfully" onto a branch has
+cost real work: a merge resolved the wrong way silently dropped the encoder's
+guards, a stray `git add -A` swept hundreds of personal files into history, and a
+merge commit on a branch that was meant to stay linear had to be unwound. None of
+that can happen from a PR.
+
 Some oddities are real and must be left alone: `Pushbutton` and both
 `Euro Pushbutton`s genuinely have no block at position 0 — their `cv_output` is a
 source 17195 times and block 0 never is. Measure before "fixing".
@@ -436,6 +496,25 @@ range with the **exponential** CV curve, the base delay held in the `delay_time`
 `delay_time` at **53% to 92%** — not through a chain of attenuators at 6%, which is
 a tenth of a semitone and inaudible. Sample the patches that do the thing before
 choosing a number.
+
+## Diffing a patch the pedal has saved
+
+Round-tripping through the hardware is the only way to learn some things, and the
+diff is not straightforward: **the pedal renumbers modules.** Match by
+`(name, mod_idx, page)`, never by `number`, or every connection appears to differ.
+
+Then compare, in this order:
+
+1. `saved_data` — the state that persists, and usually the answer
+2. `parameters_raw` — the knobs, including ones moved while playing
+3. `options_binary` — a mode changed on the device
+4. `position` / `page` — a module moved
+5. connections and `strength_raw`, matched by name
+
+And keep the generator authoritative: fold what the pedal changed back into the
+script rather than adopting its `.bin`, or the two diverge and the script stops
+being the description of the patch. Beware of diffing against a card copy that is
+older than your last build — you will "import" your own superseded values.
 
 ## Color palette
 
