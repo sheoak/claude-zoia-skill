@@ -497,6 +497,38 @@ range with the **exponential** CV curve, the base delay held in the `delay_time`
 a tenth of a semitone and inaudible. Sample the patches that do the thing before
 choosing a number.
 
+## ⚠️ A parameter's range is interpolated **geometrically**
+
+`param_defaults[name]["range"]` gives breakpoints, and a normalised value lands between
+them — but **not linearly**. Look at a typical range: `[1.33, 18.7, 283, 4120, 60000]` ms.
+Each breakpoint is about 14 times the last. It is a log scale, and the pedal interpolates
+it as one:
+
+```python
+def real(v, rng):                  # 5-point ranges
+    s = v * 4
+    i = min(int(s), 3)
+    return rng[i] * (rng[i+1] / rng[i]) ** (s - i)      # geometric
+```
+
+Interpolating linearly is wrong by 25-65% in the middle of a segment, and it is wrong in
+the direction that makes a control feel mysteriously fast. Two readings taken off a pedal
+settle it:
+
+| parameter | normalised | pedal reads | linear says | geometric says |
+| :-- | --: | --: | --: | --: |
+| `Env Follower.rise_time` | 0.21 | **12.6 ms** | 15.9 | **12.3** |
+| `Env Follower.fall_time` | 0.42 | **120 ms** | 198 | **119** |
+| `LFO.cv_control` | 0.62 | **9.00 Hz** | 10.1 | **8.80** |
+
+Values that land exactly on a breakpoint are right under either model, which is how a
+wrong conversion survives being spot-checked. `0.25`, `0.5` and `0.75` prove nothing.
+
+**Ranges containing 0 are the exception.** `LFO.cv_control` is `[0, 1.53, 5.4, 15.2, 40]`,
+and no geometric step starts at zero. That first segment is curved but is neither model —
+0.12 reads 0.561 Hz where linear predicts 0.734. Measure the bottom segment; do not
+compute it.
+
 ## Diffing a patch the pedal has saved
 
 Round-tripping through the hardware is the only way to learn some things, and the
