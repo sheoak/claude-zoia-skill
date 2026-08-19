@@ -643,6 +643,37 @@ older than your last build — you will "import" your own superseded values.
 Header colors (name used in JSON): Blue, Green, Red, Yellow, Aqua, Magenta,
 White, Orange, Lima, Surf, Sky, Purple, Pink, Peach, Mango.
 
+A cell's colour lives in **two** places and both must be written: the module's own
+`header_color_id` (a coarse 1–7 group) and the top-level `colors` array, one entry
+per module, which carries the fine 1–15 id. The encoder prefers the array when its
+length matches the module count. The fine → coarse map, verified against a patch:
+
+    Blue 1→1 · Green 2→2 · Red 3→3 · Yellow 4→4 · Aqua 5→5 · Magenta 6→6
+    White 7→7 · Orange 8→3 · Lima 9→2 · Surf 10→5 · Sky 11→1 · Purple 12→6
+    Pink 13→3 · Peach 14→3 · Mango 15→4
+
+On a `Value` or `Pushbutton` that id *is* what the cell shows. On a `UI Button` it
+is only the editor header — the cell shows the value at `in`.
+
+### The brightness ceiling is exclusive
+
+Each colour owns a 0.05 band whose bottom is the hue at zero brightness. Full
+brightness is `bottom + 0.0375`. **Past that point, and exactly on it, the cell goes
+dark — it does not saturate.** Landing a lit state on `bottom + 0.0375` is the same
+bug as overshooting it.
+
+So a brightness adder can only be 3.75% when the base sits exactly on the band
+bottom. A base deliberately lifted above the bottom — the idiom for a cell that
+stays dimly lit when off — needs the adder reduced by that same offset:
+
+    adder = 0.0375 - (base - band_bottom)          # then land just under, never on
+
+Rounding a base to a band bottom must go **up**, not to nearest: `0.70 × 65535` is
+45874.5, and 45874 drops a white cap into the peach band at full brightness.
+
+Empirically, module names only ever use space, `-`, `.` and `/` — `+`, `<`, `>`, `*`
+and `#` appear zero times in a 796-name corpus, so assume the pedal cannot type them.
+
 ## Tips for musical edits
 
 - "Brighter": raise filter cutoff / high-frequency params toward 1.0.
