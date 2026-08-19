@@ -193,12 +193,17 @@ exists. Adding a page means appending to `pages_raw` **and** incrementing
 
 **Connections** encode from the `_raw` fields whenever `strength_raw` is
 present, which it always is after a decode. `strength_raw` is *not*
-`strength * 100`: it counts hundredths of a percent, and decode truncates it
-with `int(strength_raw / 100)`, so `strength` is a display value exactly like
-`parameters`. The Magician has 8 connections whose raw value is not a multiple
-of 100 — `6990` shows as `69`, and recomputing it from that would write `6900`,
-losing 0.9 points and the byte-exact round-trip. Edit `strength_raw` directly,
-and never derive it from `strength`.
+`strength * 100` and *not* hundredths of a percent — it is **logarithmic**, so
+read "Connection strength is logarithmic" below before you reason about any
+value that is not 10000. The decoded `strength` field already holds the real
+percentage, so the fastest sanity check on a raw value is simply to compare the
+two fields the decoder gives you side by side.
+
+Still edit `strength_raw` directly and never derive it from `strength`: the
+displayed percentage is rounded to three decimals, so round-tripping through it
+loses the byte-exact encode. The Magician carries 8 connections whose raw is not
+a round percentage at all — analogue capture from the pedal's encoder — and
+recomputing those from the display would rewrite every one of them.
 
 **Verify every edit.** Re-encode, re-decode, and assert the value actually
 changed. A `roundtrip`-style byte comparison that reports *0 differing bytes
@@ -290,8 +295,24 @@ The corpus confirms it: of 198612 connections, 81.2% sit at raw 10000, and the n
 most common values are 9398, 8000, 8796, 9750 and 7398 — exactly the round
 percentages 50, 10, 25, 75 and 5.
 
-`zoia_lib` reports `strength = int(raw / 100)`, so a connection it calls "60" really
-applies **1%**. Writing `strength_raw = percent * 100` is the same error in reverse:
+**Prove it in five seconds instead of re-deriving it.** The decoder emits both fields,
+so decode any patch and compare them on a connection whose raw is not 10000:
+
+```
+raw 10685 → strength 220.039        100 * 10 ** ((10685 - 10000) / 2000) = 220.039  ✅
+raw 10164 → strength 120.781                                               120.781  ✅
+raw 10121 → strength 114.948                                               114.948  ✅
+```
+
+`raw / 100` would give 106.85 / 101.64 / 101.21. It does not match, so the law is not
+linear — and values in the 8000–10000 band are exactly where a linear misreading stays
+self-consistent and never throws (`8796` *looks* like 87.96%; it is 25%). Do this check
+before calling any range mapping a clipping bug.
+
+An old `int(raw / 100)` line survives in unpatched checkouts of `patch_binary.py`; if a
+decode hands you integer percentages, the engine is stale — `patch_cli.py where` will
+tell you which one you are on. Writing `strength_raw = percent * 100` is the same error
+in reverse:
 
 | written as | raw | what the pedal applies |
 | --- | --- | --- |
@@ -323,6 +344,12 @@ worth knowing before you reach for extra modules:
   difference back **upstream**, where a strength may exceed 100%.
 - **A parameter reading 0.0 may be perfectly correct** if a cable drives it. Do not
   "fix" it without checking what arrives.
+- **A nonzero knob under a dosed cable is a range window, not a bug.** `base 0.45` fed
+  by a knob at 40% maps that knob onto 0.45…0.85 — someone deliberately narrowing a
+  control they found too strong at the top. Round percentages (25, 40, 50, 75) are the
+  tell that a human chose them. Convert the strength properly before deciding anything
+  clips: read as `raw/100` the same pair looks like `0.45 + 0.92`, and "fixing" that
+  phantom clip re-opens the control to full range and undoes the tuning.
 
 Two traps in the same family:
 
@@ -465,6 +492,34 @@ true and was the wrong answer for a chorus, because that population is mostly lo
 delays where linear is what makes a tap tempo read in milliseconds. Narrowed to
 *short* delay lines modulated by an LFO — 192 of them — the answer is unanimously
 the other way. Ask the question about patches doing what you are doing.
+
+## ⚠️ `cpu` in the file is an allocation, not what the pedal spends
+
+Every decoded module carries a `cpu`, and `ModuleIndex.json` gives one per type.
+Both are **static estimates of what a module reserves**. Neither is what the
+pedal's meter shows, and the two are not even on the same scale — a patch the
+librarian totals at 60 can read close to 100 on the hardware.
+
+What the file cannot tell you is that some modules cost more **according to their
+parameter values**, in real time, per block:
+
+- A `Looper` costs more the further `speed_pitch` sits from unity. Off unity it
+  has to resample, so it reads and interpolates more source samples per block.
+- Overdubbing *while* the speed is off unity is far more expensive again: it
+  reads, interpolates and writes at once.
+
+So a knob can be the biggest line in the budget while its module reads 0.3 in the
+file.
+
+Options are the part you *can* read. `num_grains`, `max_grain_size`,
+`max_rec_time`, `channels` change what a module reserves, and trimming one is a
+real, static saving visible in the JSON. Trimming a knob's *range* is not — it
+caps a peak the file never described in the first place.
+
+**Never tell someone what to remove on the strength of the decoded `cpu` alone.**
+Rank modules by it if you like; then ask for the pedal's own reading, knob by
+knob, because that is the only place the runtime cost exists. The player sweeping
+a control and watching the screen will find things this format cannot express.
 
 ## Building a patch from scratch
 
