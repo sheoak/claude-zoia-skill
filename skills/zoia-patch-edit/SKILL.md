@@ -493,6 +493,37 @@ delays where linear is what makes a tap tempo read in milliseconds. Narrowed to
 *short* delay lines modulated by an LFO — 192 of them — the answer is unanimously
 the other way. Ask the question about patches doing what you are doing.
 
+### A geometric range is an interval ladder — work in octaves, not percent
+
+`param_defaults` gives a range as a list of breakpoints, and they are joined
+**geometrically**. A Looper's `speed_pitch` reads
+
+    "range": [3.1, 17.7, 100, 565.7, 3200], "unit": "%"
+
+which is one exponential with 100% at the centre of the travel:
+
+    percent = 3.125 x 1024^travel        travel = 0.5 + log2(ratio) / 10
+
+Verified against three readings off the pedal: 0.5 -> 100%, 0.7 -> 400.1%,
+1.0 -> 3200%.
+
+The useful consequence is that **0.1 of travel is exactly one octave**, since
+1024^0.1 = 2. A fifth is 0.0585, a fourth 0.0415. So a set of speeds that stay
+in tune is arithmetic on the travel, not on the percentage:
+
+| ratio | interval | percent | travel | raw |
+| --- | --- | --- | --- | --- |
+| 0.5 | octave down | 50 | 0.4000 | 26214 |
+| 0.667 | fifth down | 66.7 | 0.4415 | 28934 |
+| 0.75 | fourth down | 75 | 0.4585 | 30048 |
+| 1.0 | unison | 100 | 0.5000 | 32768 |
+| 1.5 | fifth up | 150 | 0.5585 | 36601 |
+| 2.0 | octave up | 200 | 0.6000 | 39321 |
+
+Unity is the exact centre, raw 32768. A knob left a couple of raw units off it
+is not at 100%, and the looper resamples for nothing — a real source of
+artefacts at the loop seam.
+
 ## ⚠️ `cpu` in the file is an allocation, not what the pedal spends
 
 Every decoded module carries a `cpu`, and `ModuleIndex.json` gives one per type.
