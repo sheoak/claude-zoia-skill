@@ -542,10 +542,14 @@ parameter values**, in real time, per block:
 So a knob can be the biggest line in the budget while its module reads 0.3 in the
 file.
 
-Options are the part you *can* read. `num_grains`, `max_grain_size`,
-`max_rec_time`, `channels` change what a module reserves, and trimming one is a
-real, static saving visible in the JSON. Trimming a knob's *range* is not — it
-caps a peak the file never described in the first place.
+Options are the part you *can* read — but they do not all reserve the same
+thing. `num_grains` and `channels` add voices, so they cost calculation.
+`max_grain_size` and `max_rec_time` reserve **memory**: measured on the pedal,
+raising a Granular's `max_grain_size` from 4s to 16s costs no CPU at all, because
+the DSP does the same work per sample however long a grain is.
+
+So read an option for *what it reserves*, not as a saving. And trimming a knob's
+*range* saves nothing at all — it caps a peak the file never described.
 
 **Never tell someone what to remove on the strength of the decoded `cpu` alone.**
 Rank modules by it if you like; then ask for the pedal's own reading, knob by
