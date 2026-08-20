@@ -619,6 +619,24 @@ and no geometric step starts at zero. That first segment is curved but is neithe
 0.12 reads 0.561 Hz where linear predicts 0.734. Measure the bottom segment; do not
 compute it.
 
+### ⚠️ Some ranges are linear — read the breakpoints, do not assume
+
+Geometric is common, not universal, and the breakpoints tell you which it is for free:
+**compare the middle breakpoint to the arithmetic and the geometric mean of the two ends.**
+
+| parameter | range | mid | arithmetic | geometric | law |
+| :-- | :-- | --: | --: | --: | :-- |
+| `Compressor.release` | `[0.01, 0.51, 1.01, 1.5, 2]` s | 1.01 | **1.005** | 0.141 | **linear** |
+| `Compressor.ratio` | `[1, 5.8, 10.5, 15.3, inf]` :1 | 10.5 | **10.5** | — | **linear**, then `inf` at 1.0 |
+| `Tone Control.mid_freq_1` | `[28, 156, 880, 4978, 23999]` Hz | 880 | 12013 | **820** | **geometric** |
+| `CV Delay.delay_time` | `[1.33, 18.7, 283, 4120, 60000]` ms | 283 | 30001 | **282** | **geometric** |
+
+Two-point ranges are linear: `Compressor.threshold` `[-80, 0]` dB, `attack` `[0, 10]` ms,
+`Tone Control` gains `[-18, 18]` dB. So `travel = (dB + 18) / 36` for a gain, and a gain
+of 0 dB is `0.5` exactly.
+
+Getting this backwards is how "155 ms" becomes "a bracket of 150 to 225".
+
 ## Diffing a patch the pedal has saved
 
 Round-tripping through the hardware is the only way to learn some things, and the
@@ -673,6 +691,99 @@ Rounding a base to a band bottom must go **up**, not to nearest: `0.70 × 65535`
 
 Empirically, module names only ever use space, `-`, `.` and `/` — `+`, `<`, `>`, `*`
 and `#` appear zero times in a 796-name corpus, so assume the pedal cannot type them.
+
+## The community tips document
+
+`~/Downloads/Empress ZOIA_Zebu Tips, Tricks, and Explanations.md` — ~4600 lines by
+Christopher (u/…) and contributors, organised module by module. It is the best source
+of *idiom* there is, and far better than reasoning from the module index.
+
+**But parts of it predate current firmware.** It tells you to set a sequencer's output
+to `gate` for the overdub bypass; a device check said `cv`, not `gate`. Treat it as a
+source of ideas to verify, never as ground truth about current behaviour.
+
+### Things it settles that are easy to get wrong
+
+**A looper's buttons are destinations *and* interface modules.** Wiring something to
+`record` or `playback` **changes that button's state as you connect it**. After wiring a
+looper, press the button again. This is why a record flip-flop's value can end up
+inverted relative to what the looper is actually doing — the control and the module
+desync, and no amount of reading the flip-flop will tell you the truth.
+
+**ZOIA's `Trigger` module makes a poor trigger.** Christopher: "the actual triggers ZOIA
+produces kind of suck, and I would recommend replacing them with a short AD envelope."
+If an edge is being missed or is mistimed, an ADSR with a very short attack/decay is the
+fix, not a second Trigger.
+
+**Modulate a looper's parameters *after* the loop is recorded** — modulation during
+recording can affect performance. And if a looper misbehaves after rewiring, save and
+reload the patch; that alone often fixes it.
+
+**The canonical overdub bypass sends its trigger to `playback`**, not to `record`:
+momentary → flip flop → `record`; the same switch → a 3-step one-shot sequencer
+(`off on off`) → `Trigger` → `playback`. The second press releases the flip flop, which
+*would* start overdub, but the same press advances the sequencer and the trigger jumps
+past it. One-shot means later presses only toggle overdub layers.
+
+### The min/max idiom, stated properly
+
+This is the canonical form of "a destination sums everything wired into it":
+
+- **the destination's own value sets the minimum**, or with a bipolar source, the centre
+- **the connection strength sets the maximum**, or with a bipolar source, the range each
+  way
+
+To sweep a phaser mix from 40% to 70%: park `mix` at 0.4 and wire the LFO at **30%**.
+With a −1..1 LFO the same numbers give 10%→70%, centred on 40%.
+
+### Connection strength can exceed 100%
+
+Strengths below 100% divide, **above 100% they multiply**. Six connections in Sheoak's own
+patches are above unity, up to **220.04%** (raw 10685); the observed floor is 0.2955%
+(raw 4941). The logarithmic formula extends across the whole span, so nothing special is
+needed to write one.
+
+A **`Multiplier` used as a CV VCA** is a connection strength you can reach and modulate:
+source → in 1, a `Value` → in 2, multiplier → destination. One `Value` can scale several
+connections at once by feeding several multipliers. Feed the *same* source into two
+inputs and you get `Y²` — that is how you make an exponential response.
+
+### Splitting audio doubles the gain
+
+Whenever one output feeds two paths that later recombine, **the sum is twice the signal —
+attenuate the split.** This is exactly the class of bug found in the Hierophant Mono,
+where a stray wire put a compressor in parallel with the switch that was supposed to
+route around it: the drive ran 6 dB hot and the compressor was never bypassed. A
+`Buffer Delay` may also be needed when recombining, to fix the phase.
+
+### Routing recipes worth copying
+
+**Order switching** — three 2-output `Audio Out Switch`, one control to all three:
+
+```
+in  -> sw1: out1 -> FX1        FX1 -> sw2: out1 -> FX2   FX2 -> sw3: out1 -> out
+            out2 -> FX2                    out2 -> out               out2 -> FX1
+```
+
+**Series/parallel** — same shape, but `sw1.out2` feeds *both* effects. Swap the out
+switches for **panners** and the series/parallel amount becomes continuous.
+
+Double everything for stereo.
+
+### Hiding a block
+
+An **unconnected `Pixel` placed over a block makes it unlit** — it stops you connecting
+to it by accident and cleans up the grid. That is what the isolated `cv_in: 0` Pixels
+scattered through Sheoak's patches are for; they are layout, not dead modules. Do not
+report them as defects.
+
+### There is no way to lock a UI Button's value
+
+A `UI Button` has one parameter, `in`, and the user can always turn it — and it *sums*
+with any CV, so the offset cannot be cancelled. If a control must not be editable, use a
+**`Pushbutton`** or a **`Stompswitch`**: both have **zero parameters** and only a
+`cv_output` block, so there is nothing to turn. The cost is that the colour becomes the
+module attribute, fixed, so you lose the band-bottom + brightness idiom.
 
 ## Tips for musical edits
 
