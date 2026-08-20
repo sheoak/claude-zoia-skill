@@ -777,6 +777,12 @@ to it by accident and cleans up the grid. That is what the isolated `cv_in: 0` P
 scattered through Sheoak's patches are for; they are layout, not dead modules. Do not
 report them as defects.
 
+**This means a "cell claimed twice" check produces false positives.** In Float Menu every
+Mask Pixel sits exactly on its option button's `cv_output` cell — deliberately, because
+that is how the block gets hidden. Overlapping positions are an idiom here, not a bug.
+The cost, worth documenting when you meet one: the Pixel has to be moved or deleted
+before that block's connections can be edited on the pedal.
+
 ### There is no way to lock a UI Button's value
 
 A `UI Button` has one parameter, `in`, and the user can always turn it — and it *sums*
