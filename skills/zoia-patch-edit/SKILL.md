@@ -238,6 +238,24 @@ into" a mode, a switch whose first press does nothing (it was already on), an LF
 whose rate is right but whose phase is not. Before building a workaround for any of
 those, read `saved_data`.
 
+## ⚠️ Do not read an option off `options_raw` by the index's order
+
+`ModuleIndex.json` lists an option name per byte, and for at least one module the
+list is short: `Midi Clock In` is missing `reset_out`, so every name after the
+first is off by one. `options_raw[1]` is reset_out where the index says run_out,
+and `options_raw[2]` is run_out where it says divider. Reading the index's order
+onto the bytes reports an option as on when a different one is.
+
+To learn the true byte: have the option changed on the pedal, decode before and
+after, see which byte moved. Two cheap cross-checks in the meantime — the **cell
+count** (a module grows a cell per enabled output) and the decoded **`blocks`**
+dict, which does track the real layout.
+
+Block numbers are a separate question and the index is not the answer there
+either: take the number off a wire that already works in a patch
+(`source_block_raw`). `Midi Clock In.run_out` is block 3, from the Hierophant
+MK2's own wire.
+
 ## Naming
 
 Patch, module and page names live in fixed **16-byte** fields. Ordinary
