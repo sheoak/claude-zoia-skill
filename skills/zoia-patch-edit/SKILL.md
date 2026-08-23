@@ -715,6 +715,11 @@ produces kind of suck, and I would recommend replacing them with a short AD enve
 If an edge is being missed or is mistimed, an ADSR with a very short attack/decay is the
 fix, not a second Trigger.
 
+**A `Value` is a one-tick CV buffer.** Out is what went in one tick earlier; chain N for N
+ticks. Use it to order events that fire on the same tick, or to pad fast paths so several
+land together. `cpu 0.15` vs `CV Delay` `1.5`. **A Value orders, a CV Delay spaces** — one
+tick is inaudible, so it never substitutes for a mute window. Unverified.
+
 **Modulate a looper's parameters *after* the loop is recorded** — modulation during
 recording can affect performance. And if a looper misbehaves after rewiring, save and
 reload the patch; that alone often fixes it.
