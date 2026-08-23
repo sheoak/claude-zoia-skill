@@ -256,6 +256,31 @@ either: take the number off a wire that already works in a patch
 (`source_block_raw`). `Midi Clock In.run_out` is block 3, from the Hierophant
 MK2's own wire.
 
+## ⚠️ A starred parameter is a knob, not a signal
+
+Starring writes the block's **parameter**. Modules that act on a *change of
+input* never see it: `Trigger`, `CV Flip Flop`, `ADSR.gate_input`,
+`Sample and Hold.trigger`, `Device Control`. A CC there does nothing — the block
+lights up, because the write really happened, and nothing downstream moves.
+Judge by the module *after* the one receiving the CC.
+
+Level destinations work: `Value.value`, filter frequency, mix, gain,
+`VCA.level_control`, `Out/In Switch` select. Corpus check over 176 patches, ~400
+stars: every star carrying a CC is on a level, `Value.value` alone 224 times.
+Not one assigns a CC to a change-detecting block.
+
+**To drive a trigger-ish input from MIDI**, star something whose output follows
+its input and wire that output in — a `Value`, or a `Logic Gate` (which is how
+The World's force pairs work: CC on `AND.in_1`, the gate's output to the flip
+flop). A `Midi CC In` also works but pins the channel in the patch, where a star
+follows the pedal's own channel.
+
+The CC must fall back to 0 between presses: it sums with whatever else feeds that
+input, and an input parked high can no longer rise for the CC or the button.
+
+Never star an output — three corpus patches do, two with a live CC on an audio
+out. It cannot do anything.
+
 ## Naming
 
 Patch, module and page names live in fixed **16-byte** fields. Ordinary
