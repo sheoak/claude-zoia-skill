@@ -684,6 +684,34 @@ count and `saved_data` block is then one the pedal already writes.
   source block should be one the corpus uses as a source, every destination one it
   uses as a destination.
 
+### A harvested module brings the source patch's knobs *and its state*
+
+Harvesting gives you a working record — and the **parameter values of the patch
+it came from**. Where those parameters were driven by cables, the record has them
+at **zero**, because that is what the knob was left at.
+
+Cloning the Magician's `Looper` into a patch with no `Value` on it gives
+`loop_length` 0: a loop a few milliseconds long, which cracks instead of playing.
+Same trap for `speed_pitch` 0, a filter cutoff 0, a mix 0.
+
+**`saved_data` comes along too**, and that one boots the patch into a state you
+never chose. Cloning a `Sample and Hold` copied `[68, 20, 0, 64]` — 2.0012 as a
+float — so both cloned latches booted *high*.
+
+It cost nothing until the consumer changed. The latch fed a `Trigger`, which
+reads an **edge** and saw none at boot. Rewired to an `ADSR`, which reads a
+**level**, the envelope fired at power-on and toggled the record flip flop before
+a note was played.
+
+So after cloning, do both:
+
+- Set every parameter the new patch does not cable. The source patch's own
+  `Value` defaults are the sane numbers — the Magician drives `loop_length` from
+  a `Value` at 65535 and `speed_pitch` from one at 32768.
+- **Zero `saved_data`** unless you want that state, keeping the array the length
+  `size_of_saveable_data` declares. A real `Sample and Hold` with `[0, 0, 0, 0]`
+  is the proof that zero is valid.
+
 ### Copy the numbers from patches that already work
 
 Ranges and strengths are where a structurally perfect patch still sounds wrong, and
