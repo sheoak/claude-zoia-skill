@@ -289,6 +289,39 @@ rescue a non-ASCII name, since the failure is in the encoder itself.
 Unlike the grid and raw-field traps, `roundtrip` *does* catch a mangled name:
 it re-encodes to different bytes, so the patch stops being byte-exact.
 
+### Put the type in the name
+
+A Trigger, a CV Flip Flop, a CV Invert and a Value are all one cell in and one
+cell out. On the grid the name is the only thing that tells them apart, so every
+name ends with its type in capitals:
+
+    FF   TRI   INV   SH   COMP   MUL   DLY   RCT   ONS
+
+A `Logic Gate` carries its own `operation` instead — `AND`, `NOR`, `NOT`. **No
+tag means a `Value`**; that is the default, and tagging them all would cost the
+front page its knob names.
+
+    P.State FF     L. Short TRI     Knob down INV     Smart tap SH
+    VU L1 COMP     Rate gain MUL    Lo-mid DLY        Midi active AND
+
+The field holds 16 bytes and the pedal wants one spare, so **15 characters**.
+Shorten the first part, never the tag:
+
+- A stomp position becomes `L.`, `M.`, `R.` — `Middle Short` -> `M. Short TRI`.
+- `Switch` becomes `SW`, and drops entirely only if the name still will not fit.
+- Words the tag already says go: `Toggle`, `Invert`, `Trigger`, `Det.` —
+  `BeatSync Toggle` -> `BeatSync TRI`, `Blend invert` -> `Blend INV`.
+- If it still does not fit, ask. A half-tagged page is worse than an untagged one.
+
+Two traps, both hit on real patches:
+
+- **Strip only the tag belonging to that module's type** before retagging, or a
+  Sample and Hold called `Sync Mul` loses the word that says what it does.
+- **A tag can be glued to punctuation.** `P.NOT` is already tagged; splitting on
+  spaces alone gives `P.NOT NOT`.
+- `Mid` is the middle stomp in `Mid Tap` and the Mid *band* on its own. Only
+  abbreviate it when a stomp word follows.
+
 ## ⚠️ Connection strength is logarithmic
 
 The single easiest way to build a patch that loads, round-trips byte-exact, and does
