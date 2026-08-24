@@ -827,3 +827,20 @@ module attribute, fixed, so you lose the band-bottom + brightness idiom.
   delivers `source × (strength / 100)` — it does not add the raw value.
 - Confirm the intended result with `info`, and when possible by re-decoding
   the encoded `.bin`.
+
+## Writing the documentation
+
+The patch docs are read by players, not by engineers. Write for someone who has
+never opened the patch.
+
+- Short sentences. One idea each.
+- Point by point, as a bulleted list. Blank line between blocks.
+- Say the thing. No metaphors, no "which is what makes it", no clause piled on
+  clause to sound clever.
+- Name the colour in brackets after what it means: "the rate knob (peach), tap
+  tempo (aqua) or an incoming MIDI clock (magenta)" — not a paragraph, not a
+  table.
+- Use the word the user uses for a control, even if the module inside is named
+  something else.
+- An LED description says what the brightness means and what the colour means,
+  separately, in that order.
