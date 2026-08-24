@@ -423,6 +423,19 @@ many inputs it shows. Grid cells, by contrast, are handed out only to visible
 blocks, counting from `min(position)`. Read the index for connection indices;
 count visible blocks for layout.
 
+### Never two neighbours the same colour
+
+On any page you build, no two modules whose cells touch may carry the same
+colour. A row of five identical caps reads as one block and says nothing.
+
+- Colour by what the module *drives*: a MIDI Value gets the colour of the effect
+  it forces, so the CC page matches the front page.
+- Exceptions: page 0, where the colour is the layout (meter columns, a row of
+  toggles), and anything the user has specified — a colour-by-function scheme
+  across a whole page is deliberate, do not "fix" it.
+- Check it before encoding: sort each page's modules by first cell and compare
+  each pair of touching neighbours.
+
 ## Module reference
 
 The authoritative module database is `ModuleIndex.json` inside the engine
@@ -573,6 +586,24 @@ So read an option for *what it reserves*, not as a saving. And trimming a knob's
 Rank modules by it if you like; then ask for the pedal's own reading, knob by
 knob, because that is the only place the runtime cost exists. The player sweeping
 a control and watching the screen will find things this format cannot express.
+
+### The `cpu` field is a flat rate per module type
+
+Measured across 166 corpus patches: options do not change it. Every `Chorus` is
+8.0 in mono and in stereo, every `Delay w/Mod` is 11.0 whatever its `type`, every
+`Phaser` 7.5 at any number of stages, every `Env Follower` 2.5.
+
+So the file can only tell you what *removing a module* saves. Everything an
+option costs is runtime, and only the pedal can see it. Two real examples from
+the pedal, not from the file:
+
+- `Delay w/Mod` `type: tape` -> `clean` is enough on its own to stop a patch
+  crackling. Tape emulation is the expensive setting.
+- Halving `channels` (stereo -> `1in->1out`) halves that block's work, and the
+  file's number does not move.
+
+When asked to save CPU, name the option changes first and the module deletions
+second — and ask for the pedal's reading either way.
 
 ## Building a patch from scratch
 
