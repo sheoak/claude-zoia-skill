@@ -1,0 +1,15 @@
+{
+  "name": "zoia-tools",
+  "description": "Tools for working with Empress ZOIA patches from Claude Code",
+  "owner": {
+    "name": "Sheoak",
+    "url": "https://github.com/sheoak"
+  },
+  "plugins": [
+    {
+      "name": "zoia-patch-edit",
+      "source": "./",
+      "description": "Edit Empress ZOIA .bin patches as JSON with Claude Code"
+    }
+  ]
+}

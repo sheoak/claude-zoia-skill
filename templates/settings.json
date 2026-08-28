@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "zoia-tools": {
+      "source": {
+        "source": "github",
+        "repo": "sheoak/claude-zoia-skill"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "zoia-patch-edit@zoia-tools": true
+  }
+}

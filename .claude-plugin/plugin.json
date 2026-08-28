@@ -1,0 +1,11 @@
+{
+  "name": "zoia-patch-edit",
+  "description": "Edit Empress ZOIA .bin patches as JSON with Claude Code",
+  "author": {
+    "name": "Sheoak",
+    "url": "https://github.com/sheoak"
+  },
+  "repository": "https://github.com/sheoak/claude-zoia-skill",
+  "license": "MIT",
+  "keywords": ["zoia", "empress", "patch", "music", "eurorack"]
+}
