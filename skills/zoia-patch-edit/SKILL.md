@@ -980,6 +980,29 @@ module attribute, fixed, so you lose the band-bottom + brightness idiom.
 - Confirm the intended result with `info`, and when possible by re-decoding
   the encoded `.bin`.
 
+## ⚠️ Never stage more than you edited
+
+`git add -A`, `git add .` and `git add <directory>` are banned in these repos.
+Stage the files you changed, by name, one at a time.
+
+Both of Sheoak's repos carry work in progress at all times: half-finished docs,
+a schema that has grown fields the committed validator does not know, patches
+mid-rework. Staging broadly sweeps that in, and CI is what tells you, minutes
+later, in someone else's branch.
+
+It has already happened twice in one day. `git add app/data/docs/alterneath/`
+committed an untracked directory whose YAML used `level` and `advancedPages` from
+an uncommitted schema, and the deploy went red. Before that, `git add -A` in the
+patches repo committed a Magician-Above rework that had nothing to do with the
+change at hand.
+
+    git add app/data/docs/the-lovers/0.1.0.md        # yes
+    git add app/data/docs/the-lovers/                # no
+    git add -A                                      # no
+
+Check `git status --short` before every commit and confirm the staged list is
+exactly what you touched. An untracked file appearing in it means stop.
+
 ## Writing the documentation
 
 The patch docs are read by players, not by engineers. Write for someone who has
