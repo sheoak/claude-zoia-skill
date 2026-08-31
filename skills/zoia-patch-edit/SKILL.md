@@ -780,14 +780,53 @@ settle it:
 | `Env Follower.rise_time` | 0.21 | **12.6 ms** | 15.9 | **12.3** |
 | `Env Follower.fall_time` | 0.42 | **120 ms** | 198 | **119** |
 | `LFO.cv_control` | 0.62 | **9.00 Hz** | 10.1 | **8.80** |
+| `Tone Control.mid_freq_1` | 0.4882 | **811 Hz** | 846 | **811** |
+| `Delay w/Mod.delay_time` | 0.5669 | **1161 ms** | **1161** | 1143 |
+
+The last two are the same pedal, the same afternoon: the geometric range reads geometric
+to the herz, the linear one reads linear to the millisecond. Classify the breakpoints
+first and the arithmetic follows.
 
 Values that land exactly on a breakpoint are right under either model, which is how a
 wrong conversion survives being spot-checked. `0.25`, `0.5` and `0.75` prove nothing.
 
-**Ranges containing 0 are the exception.** `LFO.cv_control` is `[0, 1.53, 5.4, 15.2, 40]`,
-and no geometric step starts at zero. That first segment is curved but is neither model —
-0.12 reads 0.561 Hz where linear predicts 0.734. Measure the bottom segment; do not
-compute it.
+**Ranges containing 0 are the exception.** `LFO.cv_control` and `Flanger.rate` are both
+`[0, 1.53, 5.4, 15.2, 40]`, and no geometric step starts at zero. Neither model fits, and
+a monotone cubic through the five points fits the top and misses the bottom by a tenth:
+
+| normalised | pedal reads | linear | monotone cubic |
+| --: | --: | --: | --: |
+| 0.12 | **0.561 Hz** | 0.734 | — |
+| 13/127 = 0.1024 | **0.462 Hz** | 0.626 | 0.511 |
+| 19/127 = 0.1496 | **0.743 Hz** | 0.915 | 0.747 |
+| 40/127 = 0.3150 | **2.221 Hz** | 2.536 | 2.221 |
+
+So: for a range that starts at zero, **measure**. Ask for two readings and interpolate
+between them — the four above are `Flanger.rate` and are worth reusing.
+
+### ⚠️ A dB range that starts at `-inf` is a linear ramp in **gain**
+
+`[float('-inf'), -12, -6, -2.5, 0]` looks like a four-segment curve and is not one. Turn
+the breakpoints into gains and they come out `[0, 0.251, 0.501, 0.750, 1]` — a straight
+line. So the normalised value **is** the gain:
+
+```python
+gain = v                      # yes, that is all
+db   = 20 * math.log10(v)     # -inf at 0
+v    = 10 ** (db / 20)
+```
+
+Three readings off `Flanger.regen`, taken 2026-08-31, all exact to the hundredth of a dB:
+
+| normalised | pedal reads | `20·log10(v)` |
+| --: | --: | --: |
+| 78/127 = 0.6142 | **-4.23 dB** | -4.23 |
+| 51/127 = 0.4016 | **-7.92 dB** | -7.92 |
+| 42/127 = 0.3307 | **-9.61 dB** | -9.61 |
+
+It holds for every level of that shape — a VCA's `level_control`, a delay's `feedback`, a
+flanger's `regen`. And it makes repeats countable: a tail is audible for about
+`77 / |db|` repeats, so -9.6 dB is eight of them and -19 dB is four.
 
 ### ⚠️ Some ranges are linear — read the breakpoints, do not assume
 
@@ -806,6 +845,52 @@ Two-point ranges are linear: `Compressor.threshold` `[-80, 0]` dB, `attack` `[0,
 of 0 dB is `0.5` exactly.
 
 Getting this backwards is how "155 ms" becomes "a bracket of 150 to 225".
+
+## ⚠️ A Sample and Hold captures what the trigger's own block carries
+
+Wire `cv_input` and `trigger` from the **same block**. Not from two ends of a chain.
+
+Built a selector as `Value -> In Switch -> Multiplier -> hold.cv_input`, with a Comparator
+on the Value driving `hold.trigger`, and it stored **zero** every time: the edge reached
+the hold a frame before the multiplier's new output did, and a shut gate outputs zero. On
+the Magician that set the looper to 3.1 % — which is `2 ** (10 * (0 - 0.5))`, the sound of
+a `speed_pitch` of exactly zero, and the tell that a hold sampled nothing.
+
+The patches that work all do it the same way, and it is worth copying verbatim:
+
+```
+gate MUL ─┬─► hold.cv_input
+          └─► hold.trigger        same block, same frame
+```
+
+Where two holds must move together, fire both from the one value that is never zero — the
+Magician's cells and the MKII's clock menu both trigger the pair from the dividend, since a
+divisor of zero would never make an edge.
+
+### ⚠️ A press CC has to fall back to zero
+
+A selector gated by a Comparator arms **once** if the CC stays up: the comparator's output
+never falls, so the hold never sees another rising edge. Whoever sends it must send the
+value, a pause, then a zero. Same for a hold triggered by the value itself — going from 127
+down to 42 is a falling edge and stores nothing.
+
+### ⚠️ A knob on a change detector needs a change, not a value
+
+The idiom is a Value and its `CV Invert` summed onto one Trigger — the Magician's
+`Knob Down TRI`, the Lovers' `Knob down INV`. At rest the two cancel, so the trigger only
+sees the one frame where one path has updated and the other has not.
+
+Which means a controller writing the value the knob **already holds** does nothing at all.
+A preset that names such a knob lands the first time and never again. Send a neighbouring
+value first and come onto the target from there; on the Magician's `Loop Clock`, arriving
+from above works. Do not reason about the direction from the module order — it is not
+worth the guess, try both.
+
+### A constructed Logic Gate comes back normalised
+
+A `NOT` carries **one** parameter. Harvested one from a patch that stored two, and the
+pedal rewrote it to one on the next save — the gate itself worked untouched. Byte-exactness
+on the way in does not mean the device agrees about the shape.
 
 ## Diffing a patch the pedal has saved
 
