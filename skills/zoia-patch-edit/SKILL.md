@@ -182,15 +182,44 @@ honest.
 | a starred param | `block_raw` | `block` |
 | a connection | `strength_raw`, `source_raw`, `source_block_raw`, `dest_raw`, `dest_block_raw` | `source`, `destination`, `strength` |
 
-**Parameters.** `parameters_raw` is positional: index `i` is the *i*-th block of
-the module with `isParam: true`, in `blocks` order — which is also the key order
-of `parameters`. The value is `round(normalized * 65535)`, so `0.24` is `15500`.
-Set both:
+**Parameters.** `parameters_raw` is positional: index `i` is the *i*-th
+`isParam` block **sorted by its `position`**, which is the key order of
+`parameters`. The value is `round(normalized * 65535)`, so `0.24` is `15500`.
+Set both, and take the index off `parameters`:
 
 ```python
-i = [n for n, b in module["blocks"].items() if b["isParam"]].index("mod_depth")
+i = list(module["parameters"]).index("mod_depth")
 module["parameters_raw"][i] = round(0.75 * 65535)
 module["parameters"]["mod_depth"] = 0.75
+```
+
+⚠️ **Not the `blocks` dict order.** The two agree for 102 of the 108 modules,
+which is exactly what makes the other six dangerous: the edit lands on a
+different knob, the patch still encodes byte-exact, `roundtrip` still passes,
+and the parameter you meant never moves.
+
+The six, checked against `ModuleIndex.json` on 2026-09-01 — every one of them a
+module you are likely to reach for:
+
+| module | index 0 is **not** | it is |
+| :-- | :-- | :-- |
+| `Phaser` | `rate` | **`mix`** |
+| `Delay w/Mod` | `delay_time` | **`mix`** |
+| `Ping Pong Delay` | `delay_time` | **`mix`** |
+| `Plate Reverb` | `decay_time` | **`mix`** |
+| `Hall Reverb` | `decay_time` | ok, but `mix` and `low_eq` swap at 1 and 2 |
+| `Looper` | ok at 0-1, then `stop_play` moves to the **end** | |
+
+`Phaser` is the one that has actually cost work: a rate written through the
+`blocks` order sets the wet mix, so the phaser goes quiet or full-wet and never
+changes speed. Read a value back before believing any number you write here.
+
+If you must use `blocks`, sort it first:
+
+```python
+by_pos = [n for n, b in sorted(module["blocks"].items(),
+                               key=lambda kv: kv[1]["position"]) if b["isParam"]]
+assert by_pos == list(module["parameters"])
 ```
 
 Never delete `parameters_raw` to force the encoder down its `parameters`
