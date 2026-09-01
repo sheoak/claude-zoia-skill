@@ -559,6 +559,53 @@ maps onto, and gain-like params are in **dB**: a VCA's `level_control` has
 `1.0` is unity. Setting a pass-through level to "half" buries the signal. Check
 the `unit` before assuming a value is linear.
 
+### Reading a `range`: five samples of a curve, and the gaps say which
+
+A `range` is not five stops to interpolate between however you like. It is the
+curve sampled at `0, ¼, ½, ¾, 1`, and **the spacing tells you the law**. Measured
+against the pedal's own display on 2026-09-01, patch on a spare slot, values read
+back by the owner:
+
+**Even gaps → linear.** `Delay w/Mod.delay_time`, `[62.5, 546.9, 1031, 1516, 2000]`
+ms — the differences are 484.4, 484.1, 485, 484.
+
+```
+ms = 62.5 + (2000 - 62.5) * x
+```
+
+`x = 0.375` predicts 789.06 ms; the pedal showed **789.1**.
+
+**Gaps growing geometrically → exponential.** The rate shared by `Phaser`,
+`Flanger`, `Chorus`, `Vibrato` and `Delay w/Mod.mod_rate`, `[0, 1.53, 5.4, 15.2, 40]`
+Hz — the differences are 1.53, 3.87, 9.8, 24.8, each ×2.53.
+
+```
+Hz = (top + 1) ** x - 1          # top = 40, so 41 ** x - 1
+```
+
+Six readings, worst error **0.002 Hz**:
+
+| x | read | `41 ** x - 1` |
+| --- | --- | --- |
+| 0 | 0 | 0 |
+| 0.25 | 1.530 | 1.5304 |
+| 0.375 | 3.025 | 3.0253 |
+| 0.5 | 5.403 | 5.4031 |
+| 0.75 | 15.202 | 15.2027 |
+| 1.0 | 39.998 | 40 |
+
+The index's own anchors are that curve rounded to three figures, which is why
+they look arbitrary — 1.53 and 15.2 are `41^0.25` and `41^0.75`.
+
+**So: check the differences before interpolating.** Averaging two anchors on the
+rate gives 3.465 Hz where the pedal gives 3.025 — 14% out, and worse near the
+bottom of the range where a chorus or a vibrato actually lives.
+
+**To measure a curve you do not know**, put several copies of the module on a
+spare slot, one per value, name each cell for the value it holds, and have the
+owner read the display. Set the module so it can be *heard* as well as read —
+a `mix` left at 0 makes a silent test, which wastes the favour you are asking.
+
 ## ⚠️ The module index is not ground truth — check it against real patches
 
 `ModuleIndex.json` is the best description of the modules that exists, and it is
